@@ -46,6 +46,7 @@ pub struct InterThreadCommunicationSystem {
     pub thread_pvs: Mutex<Vec<ScoredPrincipalVariation>>, //Thread voting system for best move
     pub thread_agreement: Mutex<HashMap<GameMove, usize>>,
     pub singular_status: UnsafeCell<Vec<bool>>, //Determine if current root is singular or not
+    pub fail_low_status: UnsafeCell<Vec<bool>>,
 
     pub depth_info: Mutex<[DepthInformation; MAX_SEARCH_DEPTH]>,
     pub start_time: RwLock<Instant>, //Only used for reporting
@@ -75,6 +76,9 @@ impl InterThreadCommunicationSystem {
     }
     pub fn singular_status(&self) -> &mut Vec<bool> {
         unsafe { self.singular_status.get().as_mut().unwrap() }
+    }
+    pub fn fail_low_status(&self) -> &mut Vec<bool> {
+        unsafe { self.fail_low_status.get().as_mut().unwrap() }
     }
     pub fn update_thread_agreement(&self, old_move: Option<GameMove>, new_move: GameMove) {
         let thread_agreement = &mut *self.thread_agreement.lock().unwrap();
@@ -178,6 +182,7 @@ impl InterThreadCommunicationSystem {
             thread_pvs: Mutex::new(Vec::new()),
             thread_agreement: Mutex::new(HashMap::new()),
             singular_status: UnsafeCell::new(Vec::new()),
+            fail_low_status: UnsafeCell::new(Vec::new()),
             depth_info: Mutex::new([DepthInformation::UnSearched; MAX_SEARCH_DEPTH]),
             nodes_searched: UnsafeCell::new(Vec::new()),
             seldepth: AtomicUsize::new(0),
@@ -213,6 +218,8 @@ impl InterThreadCommunicationSystem {
         *thread_pvs = vec![ScoredPrincipalVariation::default(); new_thread_count];
         let thread_agreement = &mut *itcs.thread_agreement.lock().unwrap();
         *thread_agreement = HashMap::new();
+        let fail_low_status = itcs.fail_low_status();
+        *fail_low_status = vec![false; new_thread_count];
 
         let itcs_tx = &mut *itcs.tx.write().unwrap();
         let itcs_nodes_searched = itcs.nodes_searched();
@@ -300,8 +307,15 @@ impl InterThreadCommunicationSystem {
         self.update_thread_agreement(curr_thread_pv.pv.pv[0], scored_pv.pv.pv[0].unwrap());
         thread_pvs[thread.id] = scored_pv.clone();
         //Do thread voting and determine thread agreement based on move-> threadcount mapping
+
         let (agreement, report_pv) = self.thread_agreement(thread_pvs);
         tc.thread_agreement = agreement;
+        let fail_low_status = self.fail_low_status();
+        fail_low_status[thread.id] = fail_low
+            && report_pv.pv.pv[0].unwrap() == scored_pv.pv.pv[0].unwrap()
+            || fail_high && report_pv.pv.pv[0].unwrap() != scored_pv.pv.pv[0].unwrap();
+        tc.resolve_fail_low = fail_low_status.iter().any(|b| *b);
+        println!("Fail low status: {}", tc.resolve_fail_low);
         println!("Agreement: {}", agreement);
         let last_reported_pv = &mut *self.last_report_pv.lock().unwrap();
         if *last_reported_pv != report_pv {

@@ -5,6 +5,7 @@ pub const MAX_MOVE_OVERHEAD: u64 = 20000;
 pub struct TimeControl {
     pub typ: TimeControlType,
     pub thread_agreement: bool,
+    pub resolve_fail_low: bool,
     pub aspired_time: u64,
 }
 impl Default for TimeControl {
@@ -13,6 +14,7 @@ impl Default for TimeControl {
             typ: TimeControlType::Infinite,
             aspired_time: 0u64,
             thread_agreement: false,
+            resolve_fail_low: false,
         }
     }
 }
@@ -124,7 +126,7 @@ impl TimeControl {
         match self.typ {
             TimeControlType::Incremental(_, _) | TimeControlType::Tournament(_, _, _) => {
                 time_spent + 4 * move_overhead > self.typ.time_left()
-                    || (self.thread_agreement
+                    || (self.thread_agreement && !self.resolve_fail_low
                         || time_spent + move_overhead
                             > (self.typ.time_left() / 6).max(self.typ.increment()))
                         && time_spent + move_overhead > self.aspired_time
