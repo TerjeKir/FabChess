@@ -132,11 +132,11 @@ pub fn principal_variation_search(mut p: CombinedSearchParameters, thread: &mut 
             return res;
         }
     }
-
     //Step 12. Futil Pruning and margin preparation
     let futil_margin = prepare_futility_pruning(&p, static_evaluation);
 
     //Step 14. Iterate through all moves
+    let mut is_singular = root && p.depth_left > 10;
     let mut current_max_score = STANDARD_SCORE;
     let mut index: usize = 0;
     let mut quiets_tried: usize = 0;
@@ -264,29 +264,47 @@ pub fn principal_variation_search(mut p: CombinedSearchParameters, thread: &mut 
         } else {
             //We are in a pv node and search with zero window all moves except the first (and with reduction). If
             // the reduced zero window search raises alpha, research
-            following_score = -principal_variation_search(
-                CombinedSearchParameters::from(
-                    -p.alpha - 1,
-                    -p.alpha,
-                    p.depth_left - 1 - reduction,
-                    &next_state,
-                    -p.color,
-                    p.current_depth + 1,
-                ),
-                thread,
-            );
-            if following_score > p.alpha {
+            following_score = if is_singular {
+                -principal_variation_search(
+                    CombinedSearchParameters::from(
+                        -p.alpha + 49,
+                        -p.alpha + 50,
+                        p.depth_left - 1 - reduction,
+                        &next_state,
+                        -p.color,
+                        p.current_depth + 1,
+                    ),
+                    thread,
+                )
+            } else {
+                p.alpha
+            };
+            if following_score > p.alpha - 50 {
+                is_singular = false;
                 following_score = -principal_variation_search(
                     CombinedSearchParameters::from(
-                        -p.beta,
+                        -p.alpha - 1,
                         -p.alpha,
-                        p.depth_left - 1,
+                        p.depth_left - 1 - reduction,
                         &next_state,
                         -p.color,
                         p.current_depth + 1,
                     ),
                     thread,
                 );
+                if following_score > p.alpha {
+                    following_score = -principal_variation_search(
+                        CombinedSearchParameters::from(
+                            -p.beta,
+                            -p.alpha,
+                            p.depth_left - 1,
+                            &next_state,
+                            -p.color,
+                            p.current_depth + 1,
+                        ),
+                        thread,
+                    );
+                }
             }
         }
 
@@ -331,7 +349,9 @@ pub fn principal_variation_search(mut p: CombinedSearchParameters, thread: &mut 
 
         index += 1;
     }
-
+    if root {
+        println!("Singular root: {}", is_singular);
+    }
     thread.history.pop();
 
     debug_assert!(
@@ -363,6 +383,9 @@ pub fn principal_variation_search(mut p: CombinedSearchParameters, thread: &mut 
         );
     }
 
+    if root && p.depth_left > 10 {
+        thread.itcs.update_singular_root(thread, is_singular);
+    }
     //Step 17. Return
     current_max_score
 }

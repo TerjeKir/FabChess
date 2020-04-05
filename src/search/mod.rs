@@ -56,7 +56,7 @@ pub enum SearchInstruction {
     StopSearching(i16),
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct ScoredPrincipalVariation {
     pub score: i16,
     pub pv: PrincipalVariation,
@@ -71,7 +71,7 @@ impl Default for ScoredPrincipalVariation {
         }
     }
 }
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct PrincipalVariation {
     pub pv: Vec<Option<GameMove>>,
 }

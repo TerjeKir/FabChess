@@ -10,6 +10,7 @@ use crate::move_generation::movegen::{
     single_push_pawn_targets, w_pawn_east_targets, w_pawn_west_targets, MoveList,
 };
 use std::fmt::{Debug, Display, Formatter, Result};
+use std::hash::Hash;
 
 pub const PAWN: usize = 0;
 pub const KNIGHT: usize = 1;
@@ -38,7 +39,7 @@ impl Display for GameResult {
         write!(formatter, "{}", res_str)
     }
 }
-#[derive(PartialEq, Clone, Debug, Copy)]
+#[derive(PartialEq, Clone, Debug, Copy, Eq, Hash)]
 pub enum GameMoveType {
     Quiet,
     Capture(PieceType),
@@ -47,7 +48,7 @@ pub enum GameMoveType {
     Promotion(PieceType, Option<PieceType>),
 }
 
-#[derive(PartialEq, Clone, Debug, Copy)]
+#[derive(PartialEq, Clone, Debug, Copy, Eq, Hash)]
 pub enum PieceType {
     King,
     Pawn,
@@ -117,14 +118,13 @@ impl PieceType {
     }
 }
 
-#[derive(Copy, PartialEq)]
+#[derive(Copy, PartialEq, Eq, Hash)]
 pub struct GameMove {
     pub from: u8,
     pub to: u8,
     pub move_type: GameMoveType,
     pub piece_type: PieceType,
 }
-
 impl Clone for GameMove {
     fn clone(&self) -> Self {
         GameMove {

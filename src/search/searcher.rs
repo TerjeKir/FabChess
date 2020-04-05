@@ -17,6 +17,7 @@ use crate::search::timecontrol::TimeControlType;
 use crate::search::{CombinedSearchParameters, ScoredPrincipalVariation, MATE_SCORE};
 use crate::uci::uci_engine::UCIOptions;
 use std::cell::UnsafeCell;
+use std::collections::HashMap;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
@@ -41,14 +42,20 @@ pub enum DepthInformation {
 }
 pub struct InterThreadCommunicationSystem {
     pub uci_options: UnsafeCell<UCIOptions>,
-    pub best_pv: Mutex<ScoredPrincipalVariation>,
+
+    pub thread_pvs: Mutex<Vec<ScoredPrincipalVariation>>, //Thread voting system for best move
+    pub thread_agreement: Mutex<HashMap<GameMove, usize>>,
+    pub singular_status: UnsafeCell<Vec<bool>>, //Determine if current root is singular or not
+
     pub depth_info: Mutex<[DepthInformation; MAX_SEARCH_DEPTH]>,
     pub start_time: RwLock<Instant>, //Only used for reporting
     pub nodes_searched: UnsafeCell<Vec<AtomicU64>>, // Only used for reporting
     pub seldepth: AtomicUsize,       // Only used for reporting
-    pub cache: UnsafeCell<Cache>,    //Only used for reporting
-    pub cache_status: AtomicUsize,
-    pub last_cache_status: Mutex<Option<Instant>>,
+
+    pub cache: UnsafeCell<Cache>,
+    pub cache_status: AtomicUsize, //Only used for reporting
+    pub last_cache_status: Mutex<Option<Instant>>, //Only used for reporting
+    pub last_report_pv: Mutex<ScoredPrincipalVariation>, // Only used for reporting
     pub timeout_flag: RwLock<bool>,
     pub tc: Mutex<TimeControl>,
     pub tx: RwLock<Vec<Sender<ThreadInstruction>>>,
@@ -66,11 +73,111 @@ impl InterThreadCommunicationSystem {
     pub fn nodes_searched(&self) -> &mut Vec<AtomicU64> {
         unsafe { self.nodes_searched.get().as_mut().unwrap() }
     }
+    pub fn singular_status(&self) -> &mut Vec<bool> {
+        unsafe { self.singular_status.get().as_mut().unwrap() }
+    }
+    pub fn update_thread_agreement(&self, old_move: Option<GameMove>, new_move: GameMove) {
+        let thread_agreement = &mut *self.thread_agreement.lock().unwrap();
+        if old_move.is_some() {
+            let old_move = old_move.unwrap();
+            debug_assert!(thread_agreement.contains_key(&old_move));
+            thread_agreement.insert(
+                old_move.clone(),
+                *thread_agreement.get(&old_move).unwrap() - 1,
+            );
+        }
+        if thread_agreement.contains_key(&new_move) {
+            thread_agreement.insert(
+                new_move.clone(),
+                *thread_agreement.get(&new_move).unwrap() + 1,
+            );
+        } else {
+            thread_agreement.insert(new_move, 1);
+        }
+    }
+
+    pub fn thread_agreement(
+        &self,
+        pvs: &Vec<ScoredPrincipalVariation>,
+    ) -> (bool, ScoredPrincipalVariation) {
+        let thread_agreement = &mut *self.thread_agreement.lock().unwrap();
+        debug_assert!(thread_agreement.len() > 0);
+        let agreement = *thread_agreement
+            .iter()
+            .max_by(|(_, &c1), (_, &c2)| {
+                if c1 < c2 {
+                    std::cmp::Ordering::Less
+                } else if c1 == c2 {
+                    std::cmp::Ordering::Equal
+                } else {
+                    std::cmp::Ordering::Greater
+                }
+            })
+            .unwrap()
+            .1
+            > 6 * self.uci_options().threads / 10;
+        let move_score = |mv| {
+            let sum: f64 = pvs
+                .iter()
+                .filter(|&other| other.depth > 0 && other.pv.pv[0].unwrap() == mv)
+                .map(|scored_pv| scored_pv.depth as f64)
+                .sum();
+            sum
+        };
+        let best_move = *thread_agreement
+            .iter()
+            .map(|(mv, count)| {
+                (
+                    mv,
+                    if *count == 0 {
+                        std::f64::NEG_INFINITY
+                    } else {
+                        move_score(*mv)
+                    },
+                )
+            })
+            .max_by(|(_, score1), (_, score2)| {
+                if score1 < score2 {
+                    std::cmp::Ordering::Less
+                } else if score1 == score2 {
+                    std::cmp::Ordering::Equal
+                } else {
+                    std::cmp::Ordering::Greater
+                }
+            })
+            .unwrap()
+            .0;
+        let best_pv = pvs
+            .iter()
+            .filter(|&mv| {
+                mv.depth > 0
+                    && mv.pv.pv[0].expect(&format!(
+                        "PVS: {:?}, best_move: {:?}, thread_agreement: {:?}",
+                        pvs, best_move, thread_agreement
+                    )) == best_move
+            })
+            .max_by(|&s1, &s2| {
+                if s1.depth < s2.depth || s1.depth == s2.depth && s1.score < s2.score {
+                    std::cmp::Ordering::Less
+                } else if s1.depth == s2.depth && s1.score == s2.score {
+                    std::cmp::Ordering::Equal
+                } else {
+                    std::cmp::Ordering::Greater
+                }
+            })
+            .expect(&format!(
+                "XPVS: {:?}, best_move: {:?}, thread_agreement: {:?}",
+                pvs, best_move, thread_agreement
+            ));
+        (agreement, best_pv.clone())
+    }
     pub fn new() -> Self {
         let (tx_f, rx_f) = channel();
         InterThreadCommunicationSystem {
             uci_options: UnsafeCell::new(UCIOptions::default()),
-            best_pv: Mutex::new(ScoredPrincipalVariation::default()),
+            thread_pvs: Mutex::new(Vec::new()),
+            thread_agreement: Mutex::new(HashMap::new()),
+            singular_status: UnsafeCell::new(Vec::new()),
             depth_info: Mutex::new([DepthInformation::UnSearched; MAX_SEARCH_DEPTH]),
             nodes_searched: UnsafeCell::new(Vec::new()),
             seldepth: AtomicUsize::new(0),
@@ -78,6 +185,7 @@ impl InterThreadCommunicationSystem {
             last_cache_status: Mutex::new(None),
             cache_status: AtomicUsize::new(0),
             cache: UnsafeCell::new(Cache::with_size(0)),
+            last_report_pv: Mutex::new(ScoredPrincipalVariation::default()),
             timeout_flag: RwLock::new(false),
             tc: Mutex::new(TimeControl::default()),
             tx: RwLock::new(Vec::new()),
@@ -98,6 +206,14 @@ impl InterThreadCommunicationSystem {
             itcs.rx_f.recv().expect("Couldn't receive exit flag!")
         }
         itcs.uci_options().threads = new_thread_count;
+
+        let singular_status = itcs.singular_status();
+        *singular_status = vec![false; new_thread_count];
+        let thread_pvs = &mut *itcs.thread_pvs.lock().unwrap();
+        *thread_pvs = vec![ScoredPrincipalVariation::default(); new_thread_count];
+        let thread_agreement = &mut *itcs.thread_agreement.lock().unwrap();
+        *thread_agreement = HashMap::new();
+
         let itcs_tx = &mut *itcs.tx.write().unwrap();
         let itcs_nodes_searched = itcs.nodes_searched();
         *itcs_tx = Vec::with_capacity(new_thread_count);
@@ -135,47 +251,61 @@ impl InterThreadCommunicationSystem {
             .sum()
     }
 
+    pub fn update_singular_root(&self, thread: &Thread, is_singular: bool) {
+        let status = self.singular_status();
+        let tc = &mut *self.tc.lock().unwrap();
+        if status[thread.id] && !is_singular {
+            tc.update_aspired_time((1.2f64).powf(1. / self.uci_options().threads as f64));
+            println!("Update singular -> not singular")
+        } else if is_singular {
+            tc.update_aspired_time((0.9f64).powf(1. / self.uci_options().threads as f64));
+            println!("Update not singular or singular -> singular")
+        }
+        status[thread.id] = is_singular;
+    }
+
     pub fn register_pv(
         &self,
+        thread: &Thread,
         scored_pv: &ScoredPrincipalVariation,
         fail_low: bool,
-        _fail_high: bool,
+        fail_high: bool,
     ) {
-        let mut curr_best = self.best_pv.lock().unwrap();
+        let thread_pvs = &mut *self.thread_pvs.lock().unwrap();
+        let curr_thread_pv = &thread_pvs[thread.id];
+        let tc = &mut *self.tc.lock().unwrap();
         //Update pv stability
         if scored_pv.depth > 10 {
-            let tc = &mut *self.tc.lock().unwrap();
             if scored_pv.score.abs() < 200 {
                 //Use less time when move score goes up, use more time when move scores goes down
-                let change = curr_best.score - scored_pv.score;
-                let factor = 1. - (change as f64 / 7.0) * 0.02;
+                let change = curr_thread_pv.score - scored_pv.score;
+                let factor = 1.
+                    + (change as f64 / 7.0)
+                        * (0.02
+                            + if fail_low {
+                                0.02
+                            } else if fail_high {
+                                -0.01
+                            } else {
+                                0.
+                            });
 
                 tc.update_aspired_time(factor.powf(1. / self.uci_options().threads as f64));
             }
-            if curr_best.pv.pv[0] == scored_pv.pv.pv[0] {
-                tc.stable_pv = true;
-                if fail_low {
-                    if curr_best.score == 0 && tc.typ != TimeControlType::Infinite {
-                        tc.aspired_time = tc.aspired_time.max(tc.typ.compound_time());
-                    }
-                    tc.update_aspired_time(1.05f64.powf(1. / self.uci_options().threads as f64));
-                } else {
-                    tc.update_aspired_time(0.98f64.powf(1. / self.uci_options().threads as f64));
-                }
-            } else {
-                tc.stable_pv = false;
-                if tc.typ != TimeControlType::Infinite {
-                    tc.aspired_time = tc.aspired_time.max(tc.typ.compound_time());
-                }
+            if curr_thread_pv.pv.pv[0] != scored_pv.pv.pv[0] {
+                tc.update_aspired_time((1.03f64).powf(1. / self.uci_options().threads as f64));
             }
         }
 
-        if curr_best.depth < scored_pv.depth
-            || (curr_best.depth == scored_pv.depth && curr_best.score < scored_pv.score)
-        {
-            if !fail_low || curr_best.pv.pv[0] == scored_pv.pv.pv[0] {
-                *curr_best = scored_pv.clone();
-            }
+        self.update_thread_agreement(curr_thread_pv.pv.pv[0], scored_pv.pv.pv[0].unwrap());
+        thread_pvs[thread.id] = scored_pv.clone();
+        //Do thread voting and determine thread agreement based on move-> threadcount mapping
+        let (agreement, report_pv) = self.thread_agreement(thread_pvs);
+        tc.thread_agreement = agreement;
+        println!("Agreement: {}", agreement);
+        let last_reported_pv = &mut *self.last_report_pv.lock().unwrap();
+        if *last_reported_pv != report_pv {
+            *last_reported_pv = report_pv.clone();
             //Report to UCI
             let searched_nodes: u64 = self.get_nodes_sum();
             let elapsed_time = self.get_time_elapsed();
@@ -193,37 +323,38 @@ impl InterThreadCommunicationSystem {
             } else {
                 self.cache_status.load(Ordering::Relaxed)
             };
-            let score_string = if scored_pv.score.abs() > MATE_SCORE - 200 {
-                let dtm = if scored_pv.score > 0 {
-                    (MATE_SCORE - scored_pv.score) / 2 + 1
+            let score_string = if report_pv.score.abs() > MATE_SCORE - 200 {
+                let dtm = if report_pv.score > 0 {
+                    (MATE_SCORE - report_pv.score) / 2 + 1
                 } else {
-                    (-MATE_SCORE - scored_pv.score) / 2
+                    (-MATE_SCORE - report_pv.score) / 2
                 };
                 format!("score mate {}", dtm)
             } else {
-                format!("score cp {}", scored_pv.score)
+                format!("score cp {}", report_pv.score)
             };
             println!(
                 "info depth {} seldepth {} nodes {} nps {} hashfull {:.0} time {} {} pv {}",
-                scored_pv.depth,
+                report_pv.depth,
                 self.seldepth.load(Ordering::Relaxed),
                 searched_nodes,
                 (searched_nodes as f64 / (elapsed_time.max(1) as f64 / 1000.0)) as u64,
                 fill_status,
                 self.get_time_elapsed(),
                 score_string,
-                scored_pv.pv
+                report_pv.pv
             );
         }
     }
 
     pub fn report_bestmove(&self) {
-        println!(
-            "bestmove {:?}",
-            self.best_pv.lock().unwrap().pv.pv[0]
-                .as_ref()
-                .expect("Could not unwrap pv for bestmove!")
-        );
+        let best_move = self
+            .thread_agreement(&*self.thread_pvs.lock().unwrap())
+            .1
+            .pv
+            .pv[0]
+            .expect("Could not unwrap pv for bestmove!");
+        println!("bestmove {:?}", best_move);
         println!(
             "info String Time Aspired: {}",
             self.tc.lock().unwrap().aspired_time
@@ -305,7 +436,8 @@ impl Thread {
         fail_low: bool,
         fail_high: bool,
     ) {
-        self.itcs.register_pv(&scored_pv, fail_low, fail_high);
+        self.itcs
+            .register_pv(&self, &scored_pv, fail_low, fail_high);
         self.current_pv = scored_pv;
         self.pv_applicable.clear();
         self.pv_applicable.push(root.hash);
@@ -496,7 +628,11 @@ pub fn search_move(
     tc: TimeControlType,
 ) -> Option<i16> {
     //1. Prepare itcs (reset things from previous search)
-    *itcs.best_pv.lock().unwrap() = ScoredPrincipalVariation::default();
+    *itcs.thread_agreement.lock().unwrap() = HashMap::new();
+    *itcs.thread_pvs.lock().unwrap() =
+        vec![ScoredPrincipalVariation::default(); itcs.uci_options().threads];
+    *itcs.singular_status() = vec![false; itcs.uci_options().threads];
+    *itcs.last_report_pv.lock().unwrap() = ScoredPrincipalVariation::default();
     *itcs.depth_info.lock().unwrap() = [DepthInformation::UnSearched; MAX_SEARCH_DEPTH];
     itcs.nodes_searched()
         .iter()
@@ -558,6 +694,9 @@ pub fn search_move(
     //Step 6. Report to UCI
     itcs.report_bestmove();
     //And return
-    let best_score = itcs.best_pv.lock().unwrap().score;
+    let best_score = itcs
+        .thread_agreement(&*itcs.thread_pvs.lock().unwrap())
+        .1
+        .score;
     Some(best_score)
 }

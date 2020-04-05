@@ -4,7 +4,7 @@ pub const MAX_MOVE_OVERHEAD: u64 = 20000;
 
 pub struct TimeControl {
     pub typ: TimeControlType,
-    pub stable_pv: bool,
+    pub thread_agreement: bool,
     pub aspired_time: u64,
 }
 impl Default for TimeControl {
@@ -12,7 +12,7 @@ impl Default for TimeControl {
         TimeControl {
             typ: TimeControlType::Infinite,
             aspired_time: 0u64,
-            stable_pv: true,
+            thread_agreement: false,
         }
     }
 }
@@ -28,7 +28,7 @@ impl TimeControlType {
         match *self {
             TimeControlType::Infinite => panic!("Don't call base time on infinite!"),
             TimeControlType::MoveTime(x) => x,
-            TimeControlType::Incremental(x, y) => TimeControlType::Tournament(x, y, 25).base_time(),
+            TimeControlType::Incremental(x, y) => TimeControlType::Tournament(x, y, 30).base_time(),
             TimeControlType::Tournament(x, _, mv) => x / mv as u64,
         }
     }
@@ -102,9 +102,8 @@ impl TimeControl {
     pub fn update_aspired_time(&mut self, mult: f64) {
         if self.typ != TimeControlType::Infinite {
             let mut new = (self.aspired_time as f64 * mult) as u64;
-            new = new.min((5. * self.typ.base_time() as f64 + self.typ.increment() as f64) as u64);
             new = new.max((0.4 * self.typ.compound_time() as f64) as u64);
-            new = new.min(self.typ.time_left() / 3 + self.typ.increment());
+            new = new.min(self.typ.time_left() / 3).max(self.typ.increment());
             println!(
                 "Update aspire. Old: {} ; Mult: {}; New: {}",
                 self.aspired_time, mult, new
@@ -118,17 +117,16 @@ impl TimeControl {
             self.aspired_time = self.typ.compound_time();
             self.update_aspired_time(1.0);
         }
-        self.stable_pv = false;
+        self.thread_agreement = false;
     }
 
     pub fn time_over(&self, time_spent: u64, move_overhead: u64) -> bool {
         match self.typ {
             TimeControlType::Incremental(_, _) | TimeControlType::Tournament(_, _, _) => {
                 time_spent + 4 * move_overhead > self.typ.time_left()
-                    || (self.stable_pv
+                    || (self.thread_agreement
                         || time_spent + move_overhead
-                            > (self.typ.compound_time() as f64 + 2. * self.typ.base_time() as f64)
-                                as u64)
+                            > (self.typ.time_left() / 6).max(self.typ.increment()))
                         && time_spent + move_overhead > self.aspired_time
             }
             TimeControlType::Infinite => false,
