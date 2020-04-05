@@ -136,7 +136,7 @@ pub fn principal_variation_search(mut p: CombinedSearchParameters, thread: &mut 
     let futil_margin = prepare_futility_pruning(&p, static_evaluation);
 
     //Step 14. Iterate through all moves
-    let mut is_singular = root && p.depth_left > 10;
+    let mut is_singular = root && p.depth_left > 10 && false;
     let mut current_max_score = STANDARD_SCORE;
     let mut index: usize = 0;
     let mut quiets_tried: usize = 0;
