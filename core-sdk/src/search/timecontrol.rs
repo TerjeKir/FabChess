@@ -5,6 +5,7 @@ pub const MAX_MOVE_OVERHEAD: u64 = 20000;
 pub struct TimeControlInformation {
     pub stable_pv: bool,
     pub expected_last_move: bool,
+    pub time_saved: u64,
 }
 
 impl TimeControlInformation {
@@ -12,6 +13,7 @@ impl TimeControlInformation {
         TimeControlInformation {
             stable_pv: false,
             expected_last_move: false,
+            time_saved: 0u64,
         }
     }
 }
@@ -88,9 +90,14 @@ impl TimeControl {
             let normal_time = (if tc_information.expected_last_move {
                 0.9
             } else {
-                1.05
+                1.1
             } * (normal_time as f64)) as u64;
-            let time_aspired = normal_time.max(*myinc);
+            let normal_time = normal_time.max(*myinc);
+            let time_aspired = if tc_information.time_saved < normal_time {
+                (normal_time as f64 * 0.85) as u64
+            } else {
+                normal_time
+            } as u64;
             if time_spent < time_aspired {
                 return false;
             }
@@ -98,7 +105,7 @@ impl TimeControl {
                 return true;
             }
             //Non stable pv so we increase time
-            return time_spent as f64 > 1.3 * (normal_time as f64);
+            return time_spent as f64 > 1.15 * ((normal_time + tc_information.time_saved) as f64);
         } else if let TimeControl::MoveTime(move_time) = self {
             return time_spent > move_time - move_overhead || *move_time < move_overhead;
         } else if let TimeControl::Infinite = self {
@@ -111,9 +118,14 @@ impl TimeControl {
             let normal_time = (if tc_information.expected_last_move {
                 0.9
             } else {
-                1.05
+                1.15
             } * (normal_time as f64)) as u64;
-            let time_aspired = normal_time.max(*myinc);
+            let normal_time = normal_time.max(*myinc);
+            let time_aspired = if tc_information.time_saved < normal_time {
+                (normal_time as f64 * 0.85) as u64
+            } else {
+                normal_time
+            } as u64;
             if time_spent < time_aspired {
                 return false;
             }
@@ -121,7 +133,7 @@ impl TimeControl {
                 return true;
             }
             //Non stable pv so we increase time
-            return time_spent as f64 > 1.3 * (normal_time as f64);
+            return time_spent as f64 > 1.15 * ((normal_time + tc_information.time_saved) as f64);
         }
         panic!("Invalid Timecontrol");
     }
@@ -130,11 +142,13 @@ impl TimeControl {
         if let TimeControl::Incremental(mytime, myinc) = self {
             let normal_timecontrol =
                 ((*mytime as f64 - saved as f64) / 30.0) as u64 + myinc - move_overhead;
+            let normal_timecontrol = normal_timecontrol.max(*myinc);
             normal_timecontrol as i64 - time_spent as i64
         } else if let TimeControl::Tournament(mytime, myinc, movestogo) = self {
             let normal_timecontrol = ((*mytime as f64 - saved as f64) / *movestogo as f64) as u64
                 + myinc
                 - move_overhead;
+            let normal_timecontrol = normal_timecontrol.max(*myinc);
             normal_timecontrol as i64 - time_spent as i64
         } else {
             0
@@ -150,9 +164,14 @@ impl TimeControl {
             let normal_time = (if tc_information.expected_last_move {
                 0.9
             } else {
-                1.05
+                1.15
             } * (normal_time as f64)) as u64;
-            let time_aspired = normal_time.max(*myinc);
+            let normal_time = normal_time.max(*myinc);
+            let time_aspired = if tc_information.time_saved < normal_time {
+                (normal_time as f64 * 0.85) as u64
+            } else {
+                normal_time
+            } as u64;
             res_str.push_str(&format!("My normal time I would spend: {}\n", normal_time));
             res_str.push_str(&format!(
                 "My aspired time I would spend: {}\n",
@@ -170,9 +189,14 @@ impl TimeControl {
             let normal_time = (if tc_information.expected_last_move {
                 0.9
             } else {
-                1.05
+                1.1
             } * (normal_time as f64)) as u64;
-            let time_aspired = normal_time.max(*myinc);
+            let normal_time = normal_time.max(*myinc);
+            let time_aspired = if tc_information.time_saved < normal_time {
+                (normal_time as f64 * 0.85) as u64
+            } else {
+                normal_time
+            } as u64;
             res_str.push_str(&format!("My normal time I would spend: {}\n", normal_time));
             res_str.push_str(&format!(
                 "My aspired time I would spend: {}\n",

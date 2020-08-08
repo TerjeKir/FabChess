@@ -188,6 +188,7 @@ pub fn checkup(thread: &mut Thread) {
                     .stable_pv
                     .load(std::sync::atomic::Ordering::Relaxed),
                 expected_last_move: thread.expected_last_move,
+                time_saved: thread.time_saved,
             },
             thread.itcs.uci_options().move_overhead,
         ))
