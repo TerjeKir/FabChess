@@ -88,7 +88,7 @@ impl TimeControl {
             let normal_time = (if tc_information.expected_last_move {
                 0.9
             } else {
-                1.1
+                1.05
             } * (normal_time as f64)) as u64;
             let time_aspired = normal_time.max(*myinc);
             if time_spent < time_aspired {
@@ -98,7 +98,7 @@ impl TimeControl {
                 return true;
             }
             //Non stable pv so we increase time
-            return time_spent as f64 > 1.15 * (normal_time as f64);
+            return time_spent as f64 > 1.3 * (normal_time as f64);
         } else if let TimeControl::MoveTime(move_time) = self {
             return time_spent > move_time - move_overhead || *move_time < move_overhead;
         } else if let TimeControl::Infinite = self {
@@ -111,7 +111,7 @@ impl TimeControl {
             let normal_time = (if tc_information.expected_last_move {
                 0.9
             } else {
-                1.1
+                1.05
             } * (normal_time as f64)) as u64;
             let time_aspired = normal_time.max(*myinc);
             if time_spent < time_aspired {
@@ -121,7 +121,7 @@ impl TimeControl {
                 return true;
             }
             //Non stable pv so we increase time
-            return time_spent as f64 > 1.15 * (normal_time as f64);
+            return time_spent as f64 > 1.3 * (normal_time as f64);
         }
         panic!("Invalid Timecontrol");
     }
@@ -150,7 +150,7 @@ impl TimeControl {
             let normal_time = (if tc_information.expected_last_move {
                 0.9
             } else {
-                1.1
+                1.05
             } * (normal_time as f64)) as u64;
             let time_aspired = normal_time.max(*myinc);
             res_str.push_str(&format!("My normal time I would spend: {}\n", normal_time));
@@ -170,7 +170,7 @@ impl TimeControl {
             let normal_time = (if tc_information.expected_last_move {
                 0.9
             } else {
-                1.1
+                1.05
             } * (normal_time as f64)) as u64;
             let time_aspired = normal_time.max(*myinc);
             res_str.push_str(&format!("My normal time I would spend: {}\n", normal_time));
