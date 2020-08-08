@@ -145,6 +145,7 @@ pub fn bench(depth: usize) {
             state,
             Vec::new(),
             search::timecontrol::TimeControl::Infinite,
+            false,
         );
         nodes += itcs.get_nodes_sum();
         itcs.cache().clear_threaded(1);

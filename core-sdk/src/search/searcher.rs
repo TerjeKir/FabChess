@@ -50,7 +50,6 @@ pub struct InterThreadCommunicationSystem {
     pub cache_status: AtomicUsize,
     pub last_cache_status: Mutex<Option<Instant>>,
     pub timeout_flag: RwLock<bool>,
-    pub saved_time: AtomicU64,
     pub tx: RwLock<Vec<Sender<ThreadInstruction>>>,
     rx_f: Receiver<()>,
     tx_f: Sender<()>,
@@ -70,7 +69,6 @@ impl Default for InterThreadCommunicationSystem {
             cache_status: AtomicUsize::new(0),
             cache: UnsafeCell::new(Cache::with_size_threaded(0, 1)),
             timeout_flag: RwLock::new(false),
-            saved_time: AtomicU64::new(0u64),
             tx: RwLock::new(Vec::new()),
             rx_f,
             tx_f,
@@ -248,7 +246,7 @@ impl InterThreadCommunicationSystem {
 unsafe impl std::marker::Sync for InterThreadCommunicationSystem {}
 pub enum ThreadInstruction {
     Exit,
-    StartSearch(i16, GameState, TimeControl, History, u64),
+    StartSearch(i16, GameState, TimeControl, History, bool),
 }
 
 pub struct Thread {
@@ -265,8 +263,8 @@ pub struct Thread {
     pub history_score: [[[isize; 64]; 64]; 2],
     pub see_buffer: Vec<i16>,
     pub search_statistics: SearchStatistics,
-    pub tc: TimeControl, //Only thread 0 takes care of Timecontrol though
-    pub time_saved: u64,
+    pub tc: TimeControl,          //Only thread 0 takes care of Timecontrol though
+    pub expected_last_move: bool, //For timecontrol information
     pub self_stop: bool, //This is set when timeout_stop is set(timeout_stop isn't always polled)
     pub current_pv: ScoredPrincipalVariation,
     pub pv_applicable: Vec<u64>, //Hashes of gamestates the pv plays along
@@ -326,7 +324,7 @@ impl Thread {
             see_buffer: vec![0i16; MAX_SEARCH_DEPTH],
             search_statistics: SearchStatistics::default(),
             tc: TimeControl::MoveTime(0u64),
-            time_saved: 0u64,
+            expected_last_move: false,
             self_stop: false,
             current_pv: ScoredPrincipalVariation::default(),
             pv_applicable: Vec::with_capacity(MAX_SEARCH_DEPTH),
@@ -344,11 +342,17 @@ impl Thread {
                     self.tx.send(()).expect("Error sending exit flag!");
                     break;
                 }
-                ThreadInstruction::StartSearch(max_depth, state, tc, history, time_saved) => {
+                ThreadInstruction::StartSearch(
+                    max_depth,
+                    state,
+                    tc,
+                    history,
+                    expected_last_move,
+                ) => {
                     self.root_plies_played =
                         (state.get_full_moves() - 1) * 2 + state.get_color_to_move();
                     self.history = history;
-                    self.time_saved = time_saved;
+                    self.expected_last_move = expected_last_move;
                     self.pv_applicable.clear();
                     self.current_pv = ScoredPrincipalVariation::default();
                     self.main_thread_in_depth = false;
@@ -479,7 +483,8 @@ pub fn search_move(
     game_state: GameState,
     history: Vec<GameState>,
     tc: TimeControl,
-) -> Option<i16> {
+    expected_move: bool,
+) -> Option<(i16, Option<GameMove>)> {
     //1. Prepare itcs (reset things from previous search)
     *itcs.best_pv.lock().unwrap() = ScoredPrincipalVariation::default();
     itcs.stable_pv.store(false, Ordering::Relaxed);
@@ -494,7 +499,6 @@ pub fn search_move(
     itcs.cache().increase_age();
     *itcs.timeout_flag.write().unwrap() = false;
 
-    let time_saved_before = itcs.saved_time.load(Ordering::Relaxed);
     //Step 1. Check how many legal moves there are
     let mut movelist = MoveList::default();
     generate_moves(&game_state, false, &mut movelist);
@@ -504,11 +508,6 @@ pub fn search_move(
         panic!("The root position given does not have any legal move!");
     } else if movelist.move_list.len() == 1 {
         println!("bestmove {:?}", movelist.move_list[0].0);
-
-        let new_timesaved: u64 = (time_saved_before as i64
-            + tc.time_saved(0, time_saved_before, itcs.uci_options().move_overhead))
-        .max(0) as u64;
-        itcs.saved_time.store(new_timesaved, Ordering::Relaxed);
         return None;
     }
 
@@ -532,7 +531,7 @@ pub fn search_move(
             game_state.clone(),
             tc,
             hist.clone(),
-            time_saved_before,
+            expected_move,
         ))
         .expect("Couldn't send search command!");
     }
@@ -546,17 +545,16 @@ pub fn search_move(
 
     //Step 6. Report to UCI
     itcs.report_bestmove();
-    //Store new saved time
-    let elapsed_time = itcs.get_time_elapsed();
-    let new_timesaved: u64 = (time_saved_before as i64
-        + tc.time_saved(
-            elapsed_time,
-            time_saved_before,
-            itcs.uci_options().move_overhead,
-        ))
-    .max(0) as u64;
-    itcs.saved_time.store(new_timesaved, Ordering::Relaxed);
+
     //And return
     let best_score = itcs.best_pv.lock().unwrap().score;
-    Some(best_score)
+    let expect_move = itcs
+        .best_pv
+        .lock()
+        .unwrap()
+        .pv
+        .pv
+        .get(1)
+        .map_or(None, |x| *x);
+    Some((best_score, expect_move))
 }

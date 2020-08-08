@@ -10,7 +10,7 @@ use core_sdk::search::searcher::{
 use core_sdk::search::timecontrol::{TimeControl, MAX_MOVE_OVERHEAD, MIN_MOVE_OVERHEAD};
 use core_sdk::search::MAX_SEARCH_DEPTH;
 use std::io;
-use std::sync::{atomic::Ordering, Arc};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use std::u64;
@@ -50,7 +50,6 @@ pub fn parse_loop() {
             "ucinewgame" | "newgame" => {
                 newgame(&mut us);
                 itcs.cache().clear_threaded(itcs.uci_options().threads);
-                itcs.saved_time.store(0, Ordering::Relaxed);
             }
             "isready" => isready(&itcs, true),
             "position" => {
@@ -65,10 +64,22 @@ pub fn parse_loop() {
                 }
                 let new_state = us.internal_state.clone();
                 let itcs = Arc::clone(&itcs);
+                let expect_move = Arc::clone(&us.expect_move);
+                let expected_move = us.expected_move;
                 thread::Builder::new()
                     .stack_size(2 * 1024 * 1024)
                     .spawn(move || {
-                        search_move(itcs, depth as i16, new_state, new_history, tc);
+                        let res = search_move(
+                            itcs,
+                            depth as i16,
+                            new_state,
+                            new_history,
+                            tc,
+                            expected_move,
+                        );
+                        if res.is_some() {
+                            *expect_move.lock().unwrap() = res.unwrap().1;
+                        }
                     })
                     .expect("Couldn't start thread");
             }
@@ -193,8 +204,15 @@ pub fn position(
             //Parse the move and make it
             let mv = cmd[move_index];
             let (from, to, promo) = GameMove::string_to_move(mv);
-            engine.internal_state =
-                scout_and_make_draftmove(from, to, promo, &engine.internal_state, movelist);
+            engine.internal_state = scout_and_make_draftmove(
+                from,
+                to,
+                promo,
+                &engine.internal_state,
+                movelist,
+                engine.expect_move.lock().unwrap().clone(),
+                &mut engine.expected_move,
+            );
             history.push(engine.internal_state.clone());
             move_index += 1;
         }
@@ -209,6 +227,8 @@ pub fn scout_and_make_draftmove(
     promo_pieces: Option<PieceType>,
     game_state: &GameState,
     movelist: &mut movegen::MoveList,
+    expect_move: Option<GameMove>,
+    expected_move: &mut bool,
 ) -> GameState {
     movegen::generate_moves(&game_state, false, movelist);
     for gmv in movelist.move_list.iter() {
@@ -226,6 +246,7 @@ pub fn scout_and_make_draftmove(
                     }
                 }
             }
+            *expected_move = expect_move.is_some() && expect_move.unwrap() == mv;
             return make_move(&game_state, mv);
         }
     }
@@ -337,4 +358,6 @@ pub fn setoption(cmd: &[&str], itcs: &Arc<InterThreadCommunicationSystem>) {
 
 pub fn newgame(engine: &mut UCIEngine) {
     engine.internal_state = GameState::standard();
+    engine.expected_move = false;
+    *engine.expect_move.lock().unwrap() = None;
 }

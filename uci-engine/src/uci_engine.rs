@@ -1,10 +1,13 @@
-use core_sdk::board_representation::game_state::GameState;
+use core_sdk::board_representation::game_state::{GameMove, GameState};
+use std::sync::{Arc, Mutex};
 
 pub struct UCIEngine<'a> {
     pub name: &'a str,
     pub author: &'a str,
     pub contributors: &'a [&'a str],
     pub internal_state: GameState,
+    pub expect_move: Arc<Mutex<Option<GameMove>>>,
+    pub expected_move: bool,
 }
 
 impl<'a> UCIEngine<'a> {
@@ -23,6 +26,8 @@ impl<'a> UCIEngine<'a> {
             author: &"Fabian von der Warth",
             contributors: &["Erik Imgrund", "Marcin Mielniczuk"],
             internal_state: GameState::standard(),
+            expect_move: Arc::new(Mutex::new(None)),
+            expected_move: false,
         }
     }
 
