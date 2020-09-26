@@ -121,16 +121,6 @@ pub fn eval_game_state(g: &GameState) -> EvaluationResult {
     }
     let mut res = EvaluationScore::default();
 
-    let tempo = if g.get_color_to_move() == WHITE { TEMPO_BONUS } else { TEMPO_BONUS * -1 };
-    res += tempo;
-    #[cfg(feature = "display-eval")]
-    {
-        println!("\nTempo:{}", tempo);
-    }
-    #[cfg(feature = "texel-tuning")]
-    {
-        result.trace.normal_coeffs[IDX_TEMPO_BONUS] = if g.get_color_to_move() == WHITE { 1 } else { -1 };
-    }
     //Initialize all attacks
     let (white_defended_by_minors, white_defended_by_majors) = (g.get_minor_attacks_from_side(WHITE), g.get_major_attacks_from_side(WHITE));
     let white_defended = white_defended_by_minors | white_defended_by_majors | KING_ATTACKS[g.get_king_square(WHITE)];
@@ -277,6 +267,16 @@ pub fn eval_game_state(g: &GameState) -> EvaluationResult {
         #[cfg(feature = "texel-tuning")]
         &mut result.trace,
     );
+    let tempo = if g.get_color_to_move() == WHITE { TEMPO_BONUS } else { TEMPO_BONUS * -1 };
+    res += tempo;
+    #[cfg(feature = "display-eval")]
+    {
+        println!("\nTempo:{}", tempo);
+    }
+    #[cfg(feature = "texel-tuning")]
+    {
+        result.trace.normal_coeffs[IDX_TEMPO_BONUS] = if g.get_color_to_move() == WHITE { 1 } else { -1 };
+    }
     res.1 = (f64::from(res.1) / 1.5) as i16;
     //Phasing is done the same way stockfish does it
     let final_res = res.interpolate(phase);

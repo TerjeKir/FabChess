@@ -3,6 +3,7 @@ use super::quiescence::q_search;
 use super::*;
 use super::{MATE_SCORE, MAX_SEARCH_DEPTH, STANDARD_SCORE};
 use crate::evaluation::eval_game_state;
+use crate::evaluation::params::TEMPO_BONUS;
 use crate::move_generation::makemove::{make_move, make_nullmove};
 use crate::search::cache::{CacheEntry, INVALID_STATIC_EVALUATION};
 use crate::search::moveordering::{MoveOrderer, NORMAL_STAGES};
@@ -104,6 +105,19 @@ pub fn principal_variation_search(mut p: CombinedSearchParameters, thread: &mut 
     };
     let static_evaluation = if tt_entry.is_some() && tt_entry.unwrap().static_evaluation != INVALID_STATIC_EVALUATION {
         tt_entry.unwrap().static_evaluation
+    } else if p.current_depth >= 1 && thread.pv_table[p.current_depth - 1].pv[0].is_none() {
+        //This means we made a null move at the last depth, and we can recover
+        let prev_eval = thread.eval_hist[p.current_depth - 1].unwrap();
+        let mut tempo_bonus = TEMPO_BONUS;
+        tempo_bonus.1 = (f64::from(tempo_bonus.1) / 1.5) as i16;
+        let tempo_bonus = tempo_bonus.interpolate(p.game_state.get_phase().phase);
+        if p.color == 1 {
+            //We are now white, this means 1 ago we were black -> add tempo-bonus two times
+            prev_eval + 2 * tempo_bonus
+        } else {
+            //We are now black, this means 1 ago we were white -> subtract tempo-bonus twice
+            prev_eval - 2 * tempo_bonus
+        }
     } else {
         eval_game_state(p.game_state).final_eval
     };
@@ -222,6 +236,10 @@ pub fn principal_variation_search(mut p: CombinedSearchParameters, thread: &mut 
         };
 
         let next_state = make_move(p.game_state, mv);
+        if thread.pv_table[p.current_depth].pv[0].is_none() {
+            //Write a move to the pv table so that we can correctly identify if we made a null move in the last depth
+            thread.pv_table[p.current_depth].pv[0] = Some(mv);
+        }
         //Step 14.8. Search the moves
         let mut following_score: i16;
         if p.depth_left <= 2 || !is_pv_node || index == 0 {
