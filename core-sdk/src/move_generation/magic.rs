@@ -1,4 +1,5 @@
 use crate::bitboards::bitboards::magic_constants::*;
+use crate::bitboards::bitboards::BitBoard;
 include!(concat!(env!("OUT_DIR"), "/magic_attacks.rs"));
 
 use std::fmt::Display;
@@ -13,25 +14,25 @@ pub struct Magic {
 
 impl Magic {
     #[inline(always)]
-    pub fn bishop(square: usize, occ: u64) -> u64 {
+    pub fn bishop(square: usize, occ: BitBoard) -> BitBoard {
         MAGIC_BISHOP[square].apply(occ)
     }
 
     #[inline(always)]
-    pub fn rook(square: usize, occ: u64) -> u64 {
+    pub fn rook(square: usize, occ: BitBoard) -> BitBoard {
         MAGIC_ROOK[square].apply(occ)
     }
 
     #[cfg(all(target_arch = "x86_64", target_feature = "bmi2"))]
     #[inline(always)]
-    pub fn apply(&self, occ: u64) -> u64 {
+    pub fn apply(&self, occ: BitBoard) -> BitBoard {
         use std::arch::x86_64::_pext_u64;
-        ATTACKS[self.offset + unsafe { _pext_u64(occ, self.occupancy_mask) } as usize]
+        BitBoard(ATTACKS[self.offset + unsafe { _pext_u64(occ.0, self.occupancy_mask) } as usize])
     }
 
     #[cfg(not(all(target_arch = "x86_64", target_feature = "bmi2")))]
     #[inline(always)]
-    pub fn apply(&self, occ: u64) -> u64 {
+    pub fn apply(&self, occ: BitBoard) -> BitBoard {
         ATTACKS[self.offset + apply_magic(self.magic, occ & self.occupancy_mask, self.shift)]
     }
 }

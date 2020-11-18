@@ -1,5 +1,5 @@
 use super::EvaluationScore;
-use crate::bitboards::bitboards::constants::square;
+use crate::bitboards::bitboards::BitBoard;
 use crate::board_representation::game_state::{GameState, PieceType, PIECE_TYPES, WHITE};
 use crate::evaluation::params::{KING_PIECE_TABLE, PSQT};
 
@@ -24,9 +24,8 @@ pub fn psqt(game_state: &GameState, side: usize, #[cfg(feature = "tuning")] trac
         let mut piece_sum = EvaluationScore::default();
         let mut piece = game_state.get_piece(pt, side);
 
-        while piece > 0 {
-            let idx = piece.trailing_zeros() as usize;
-            piece ^= square(idx);
+        while piece.not_empty() {
+            let idx = piece.pop_lsb() as usize;
             piece_sum += PSQT[pt as usize][side][idx] * if side == WHITE { 1 } else { -1 };
 
             #[cfg(feature = "tuning")]
@@ -47,9 +46,8 @@ pub fn psqt(game_state: &GameState, side: usize, #[cfg(feature = "tuning")] trac
         for &piece_type in [PieceType::Pawn].iter() {
             let mut king_piece_sum = EvaluationScore::default();
             let mut piece = game_state.get_piece(PieceType::Pawn, side ^ piece_side);
-            while piece > 0 {
-                let idx = piece.trailing_zeros() as usize;
-                piece ^= square(idx);
+            while piece.not_empty() {
+                let idx = piece.pop_lsb() as usize;
                 king_piece_sum += KING_PIECE_TABLE[side][game_state.get_king_square(side)][piece_side][piece_type as usize][idx] * if side == WHITE { 1 } else { -1 };
                 #[cfg(feature = "tuning")]
                 {
@@ -80,16 +78,14 @@ pub fn kp_add_piece(king_side: usize, king_square: usize, friendly_piece: bool, 
     *score += KING_PIECE_TABLE[king_side][king_square][!friendly_piece as usize][piece_type as usize][square];
 }
 #[inline(always)]
-pub fn kp_move_king(king_start: usize, king_dest: usize, mut friendly_pawns: u64, mut enemy_pawns: u64, side: usize, score: &mut EvaluationScore) {
-    while enemy_pawns > 0 {
-        let idx = enemy_pawns.trailing_zeros() as usize;
-        enemy_pawns ^= square(idx);
+pub fn kp_move_king(king_start: usize, king_dest: usize, mut friendly_pawns: BitBoard, mut enemy_pawns: BitBoard, side: usize, score: &mut EvaluationScore) {
+    while enemy_pawns.not_empty() {
+        let idx = enemy_pawns.pop_lsb() as usize;
         kp_remove_piece(side, king_start, false, PieceType::Pawn, idx, score);
         kp_add_piece(side, king_dest, false, PieceType::Pawn, idx, score);
     }
-    while friendly_pawns > 0 {
-        let idx = friendly_pawns.trailing_zeros() as usize;
-        friendly_pawns ^= square(idx);
+    while friendly_pawns.not_empty() {
+        let idx = friendly_pawns.pop_lsb() as usize;
         kp_remove_piece(side, king_start, true, PieceType::Pawn, idx, score);
         kp_add_piece(side, king_dest, true, PieceType::Pawn, idx, score);
     }

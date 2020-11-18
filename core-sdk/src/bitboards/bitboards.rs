@@ -1,6 +1,114 @@
 use constants::*;
+use std::ops::*;
 
 use crate::board_representation::game_state::WHITE;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct BitBoard(pub u64);
+
+impl BitBoard {
+    pub fn lsb(self) -> u32 {
+        debug_assert!(self.0 != 0u64);
+        self.0.trailing_zeros()
+    }
+
+    pub fn pop_lsb(&mut self) -> u32 {
+        let lsb = self.lsb();
+        self.0 &= self.0 - 1u64;
+        lsb
+    }
+
+    pub fn popcount(self) -> u32 {
+        self.0.count_ones()
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.0 == 0u64
+    }
+
+    pub fn not_empty(self) -> bool {
+        !self.is_empty()
+    }
+}
+
+impl Iterator for BitBoard {
+    type Item = u32;
+
+    fn next(&mut self) -> Option<u32> {
+        if self.is_empty() {
+            return None;
+        }
+        Some(self.pop_lsb())
+    }
+}
+
+impl Not for BitBoard {
+    type Output = Self;
+
+    fn not(self) -> Self::Output {
+        Self(!self.0)
+    }
+}
+
+impl BitAnd for BitBoard {
+    type Output = Self;
+
+    fn bitand(self, rhs: Self) -> Self::Output {
+        Self(self.0 & rhs.0)
+    }
+}
+
+impl BitOr for BitBoard {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl BitXor for BitBoard {
+    type Output = Self;
+
+    fn bitxor(self, rhs: Self) -> Self::Output {
+        Self(self.0 ^ rhs.0)
+    }
+}
+
+impl BitAndAssign for BitBoard {
+    fn bitand_assign(&mut self, rhs: Self) {
+        self.0 &= rhs.0
+    }
+}
+
+impl BitOrAssign for BitBoard {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0
+    }
+}
+
+impl BitXorAssign for BitBoard {
+    fn bitxor_assign(&mut self, rhs: Self) {
+        self.0 ^= rhs.0
+    }
+}
+
+impl Shr<i32> for BitBoard {
+    type Output = Self;
+
+    fn shr(self, rhs: i32) -> Self::Output {
+        let Self(lhs) = self;
+        Self(lhs >> rhs)
+    }
+}
+
+impl Shl<i32> for BitBoard {
+    type Output = Self;
+
+    fn shl(self, rhs: i32) -> Self::Output {
+        let Self(lhs) = self;
+        Self(lhs << rhs)
+    }
+}
 
 pub mod square {
     #[rustfmt::skip]
@@ -86,18 +194,21 @@ pub mod magic_constants {
 }
 pub mod constants {
 
+    use super::BitBoard;
+
     #[inline(always)]
-    pub const fn square(square: usize) -> u64 {
-        1u64 << square
+    pub const fn square(sq: usize) -> BitBoard {
+        BitBoard(1u64 << sq)
     }
     #[inline(always)]
-    pub const fn not_square(square: usize) -> u64 {
-        !(1u64 << square)
+    pub const fn not_square(sq: usize) -> BitBoard {
+        !square(sq)
     }
     #[inline(always)]
-    pub const fn not_file(file: usize) -> u64 {
-        !FILES[file]
+    pub const fn not_file(file: usize) -> BitBoard {
+        BitBoard(!FILES[file])
     }
+
     #[rustfmt::skip]
     pub const FILES : [u64;8] = [72340172838076673u64, 144680345676153346u64, 289360691352306692u64, 578721382704613384u64, 1157442765409226768u64, 2314885530818453536u64, 4629771061636907072u64, 9259542123273814144u64, ];
     #[rustfmt::skip]
@@ -142,17 +253,17 @@ pub mod constants {
 }
 
 #[inline(always)]
-pub const fn north_one(board: u64) -> u64 {
+pub const fn north_one(board: BitBoard) -> BitBoard {
     board << 8
 }
 
 #[inline(always)]
-pub const fn south_one(board: u64) -> u64 {
+pub const fn south_one(board: BitBoard) -> BitBoard {
     board >> 8
 }
 
 #[inline(always)]
-pub const fn forward_one(board: u64, side: usize) -> u64 {
+pub const fn forward_one(board: BitBoard, side: usize) -> BitBoard {
     if side == WHITE {
         north_one(board)
     } else {
@@ -161,37 +272,37 @@ pub const fn forward_one(board: u64, side: usize) -> u64 {
 }
 
 #[inline(always)]
-pub const fn west_one(board: u64) -> u64 {
-    (board & !FILES[0]) >> 1
+pub const fn west_one(board: BitBoard) -> BitBoard {
+    (board & BitBoard(!FILES[0])) >> 1
 }
 
 #[inline(always)]
-pub const fn east_one(board: u64) -> u64 {
-    (board & !FILES[7]) << 1
+pub const fn east_one(board: BitBoard) -> BitBoard {
+    (board & BitBoard(!FILES[7])) << 1
 }
 
 #[inline(always)]
-pub const fn north_east_one(board: u64) -> u64 {
-    (board & !FILES[7]) << 9
+pub const fn north_east_one(board: BitBoard) -> BitBoard {
+    (board & BitBoard(!FILES[7])) << 9
 }
 
 #[inline(always)]
-pub const fn north_west_one(board: u64) -> u64 {
-    (board & !FILES[0]) << 7
+pub const fn north_west_one(board: BitBoard) -> BitBoard {
+    (board & BitBoard(!FILES[0])) << 7
 }
 
 #[inline(always)]
-pub const fn south_east_one(board: u64) -> u64 {
-    (board & !FILES[7]) >> 7
+pub const fn south_east_one(board: BitBoard) -> BitBoard {
+    (board & BitBoard(!FILES[7])) >> 7
 }
 
 #[inline(always)]
-pub const fn south_west_one(board: u64) -> u64 {
-    (board & !FILES[0]) >> 9
+pub const fn south_west_one(board: BitBoard) -> BitBoard {
+    (board & BitBoard(!FILES[0])) >> 9
 }
 
 #[inline(always)]
-pub const fn north_fill(mut gen: u64) -> u64 {
+pub const fn north_fill(mut gen: BitBoard) -> BitBoard {
     gen |= gen << 8;
     gen |= gen << 16;
     gen |= gen << 32;
@@ -199,7 +310,7 @@ pub const fn north_fill(mut gen: u64) -> u64 {
 }
 
 #[inline(always)]
-pub const fn south_fill(mut gen: u64) -> u64 {
+pub const fn south_fill(mut gen: BitBoard) -> BitBoard {
     gen |= gen >> 8;
     gen |= gen >> 16;
     gen |= gen >> 32;
@@ -207,12 +318,12 @@ pub const fn south_fill(mut gen: u64) -> u64 {
 }
 
 #[inline(always)]
-pub const fn file_fill(gen: u64) -> u64 {
+pub const fn file_fill(gen: BitBoard) -> BitBoard {
     north_fill(gen) | south_fill(gen)
 }
 
 #[inline(always)]
-pub const fn pawn_front_span(pawns: u64, side: usize) -> u64 {
+pub const fn pawn_front_span(pawns: BitBoard, side: usize) -> BitBoard {
     if side == WHITE {
         north_one(north_fill(pawns))
     } else {

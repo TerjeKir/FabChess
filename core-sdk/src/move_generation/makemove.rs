@@ -1,36 +1,37 @@
 use crate::bitboards::bitboards::constants::{square, CASTLE_PERMISSION};
 use crate::bitboards::bitboards::square;
+use crate::bitboards::bitboards::BitBoard;
 use crate::board_representation::game_state::{ep_pawn_square, file_of, swap_side, GameMove, GameMoveType, GameState, Irreversible, PieceType};
 use crate::board_representation::zobrist_hashing::ZOBRIST_KEYS;
 use crate::evaluation::psqt_evaluation::{kp_add_piece, kp_move_king, kp_remove_piece, psqt_add_piece, psqt_remove_piece};
 use crate::evaluation::EvaluationScore;
 
 #[inline(always)]
-pub fn toggle_piece(piece_bb: &mut [u64; 6], color_bb: &mut [u64; 2], piece: PieceType, sq: usize, color: usize, hash: &mut u64) {
+pub fn toggle_piece(piece_bb: &mut [BitBoard; 6], color_bb: &mut [BitBoard; 2], piece: PieceType, sq: usize, color: usize, hash: &mut u64) {
     piece_bb[piece as usize] ^= square(sq);
     color_bb[color] ^= square(sq);
     *hash ^= piece.to_zobrist_key(color, sq);
 }
 
 #[inline(always)]
-pub fn add_piece(piece_bb: &mut [u64; 6], color_bb: &mut [u64; 2], piece: PieceType, sq: usize, color: usize, hash: &mut u64, score: &mut EvaluationScore) {
+pub fn add_piece(piece_bb: &mut [BitBoard; 6], color_bb: &mut [BitBoard; 2], piece: PieceType, sq: usize, color: usize, hash: &mut u64, score: &mut EvaluationScore) {
     toggle_piece(piece_bb, color_bb, piece, sq, color, hash);
     psqt_add_piece(piece, sq, color, score);
 }
 
 #[inline(always)]
-pub fn remove_piece(piece_bb: &mut [u64; 6], color_bb: &mut [u64; 2], piece: PieceType, sq: usize, color: usize, hash: &mut u64, score: &mut EvaluationScore) {
+pub fn remove_piece(piece_bb: &mut [BitBoard; 6], color_bb: &mut [BitBoard; 2], piece: PieceType, sq: usize, color: usize, hash: &mut u64, score: &mut EvaluationScore) {
     toggle_piece(piece_bb, color_bb, piece, sq, color, hash);
     psqt_remove_piece(piece, sq, color, score);
 }
 
 #[inline(always)]
-pub fn enpassant_hash(old: u64, new: u64, hash: &mut u64) {
-    if old != 0u64 {
-        *hash ^= ZOBRIST_KEYS.en_passant[file_of(old.trailing_zeros() as usize)];
+pub fn enpassant_hash(old: BitBoard, new: BitBoard, hash: &mut u64) {
+    if old.not_empty() {
+        *hash ^= ZOBRIST_KEYS.en_passant[file_of(old.lsb() as usize)];
     }
-    if new != 0u64 {
-        *hash ^= ZOBRIST_KEYS.en_passant[file_of(new.trailing_zeros() as usize)];
+    if new.not_empty() {
+        *hash ^= ZOBRIST_KEYS.en_passant[file_of(new.lsb() as usize)];
     }
 }
 
@@ -44,7 +45,7 @@ pub fn make_nullmove(g: &GameState) -> GameState {
     let color_to_move = swap_side(g.get_color_to_move());
     let piece_bb = g.get_piece_bb_array();
     let color_bb = g.get_color_bb_array();
-    let en_passant = 0u64;
+    let en_passant = BitBoard::default();
     let half_moves = g.get_half_moves() + 1;
     let full_moves = g.get_full_moves() + g.get_color_to_move();
     let mut hash = g.get_hash() ^ ZOBRIST_KEYS.side_to_move;
@@ -136,7 +137,7 @@ pub fn make_move(g: &GameState, mv: GameMove) -> GameState {
     let en_passant = if mv.move_type == GameMoveType::Quiet && mv.piece_type == PieceType::Pawn && (to as isize - from as isize).abs() == 16 {
         square(ep_pawn_square(to))
     } else {
-        0u64
+        BitBoard::default()
     };
     enpassant_hash(g.get_en_passant(), en_passant, &mut hash);
     //Step 5. Half moves

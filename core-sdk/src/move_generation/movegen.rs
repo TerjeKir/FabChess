@@ -1,6 +1,7 @@
 use super::magic::{self};
 use crate::bitboards::bitboards;
 use crate::bitboards::bitboards::constants::{square, BISHOP_RAYS, FREEFIELD_BISHOP_ATTACKS, FREEFIELD_ROOK_ATTACKS, KING_ATTACKS, KNIGHT_ATTACKS, RANKS, ROOK_RAYS};
+use crate::bitboards::bitboards::BitBoard;
 use crate::bitboards::bitboards::{forward_one, square};
 use crate::board_representation::game_state::{rank_of, swap_side, GameMove, GameMoveType, GameState, PieceType, WHITE};
 use crate::search::GradedMove;
@@ -8,40 +9,38 @@ use crate::search::GradedMove;
 impl GameState {
     //Attacks from rook + queen
     //Rook+Queen attacks xray the king of the color to move, if side != color_to_move
-    pub fn get_major_attacks_from_side(&self, side: usize) -> u64 {
+    pub fn get_major_attacks_from_side(&self, side: usize) -> BitBoard {
         let occupied_squares = if side == self.get_color_to_move() {
             self.get_all_pieces()
         } else {
             self.get_all_pieces_without_ctm_king()
         };
-        let mut res = 0u64;
+        let mut res = BitBoard::default();
         //TODO Kogge Stone
         for pt in [PieceType::Rook, PieceType::Queen].iter() {
             let mut piece = self.get_piece(*pt, side);
-            while piece > 0 {
-                let idx = piece.trailing_zeros() as usize;
+            while piece.not_empty() {
+                let idx = piece.pop_lsb() as usize;
                 res |= (*pt).attacks(idx, occupied_squares);
-                piece ^= square(idx);
             }
         }
         res
     }
     //Attacks from bishop + knight + pawns
     //Bishop attacks xray the king of the color to move, if side != color_to_move
-    pub fn get_minor_attacks_from_side(&self, side: usize) -> u64 {
+    pub fn get_minor_attacks_from_side(&self, side: usize) -> BitBoard {
         let occupied_squares = if side == self.get_color_to_move() {
             self.get_all_pieces()
         } else {
             self.get_all_pieces_without_ctm_king()
         };
-        let mut res = 0u64;
+        let mut res = BitBoard::default();
         //TODO Kogge Stone
         for pt in [PieceType::Knight, PieceType::Bishop].iter() {
             let mut piece = self.get_piece(*pt, side);
-            while piece > 0 {
-                let idx = piece.trailing_zeros() as usize;
+            while piece.not_empty() {
+                let idx = piece.pop_lsb() as usize;
                 res |= (*pt).attacks(idx, occupied_squares);
-                piece ^= square(idx);
             }
         }
         res |= pawn_targets(side, self.get_piece(PieceType::Pawn, side));
@@ -49,14 +48,14 @@ impl GameState {
     }
 
     //King + major + minor attacks from side
-    pub fn get_attacks_from_side(&self, side: usize) -> u64 {
-        self.get_major_attacks_from_side(side) | self.get_minor_attacks_from_side(side) | PieceType::King.attacks(self.get_king_square(side), 0u64)
+    pub fn get_attacks_from_side(&self, side: usize) -> BitBoard {
+        self.get_major_attacks_from_side(side) | self.get_minor_attacks_from_side(side) | PieceType::King.attacks(self.get_king_square(side), BitBoard::default())
     }
 
     //Returns true if the given square is attacked by the side not to move
     //occ: Blockers in the current position. Might be all_pieces or all_pieces without ctm king
     //exclude: Exclude all attacks from pieces given in the exclude bitboard
-    pub fn square_attacked(&self, sq: usize, occ: u64, exclude: u64) -> bool {
+    pub fn square_attacked(&self, sq: usize, occ: BitBoard, exclude: BitBoard) -> bool {
         let square = square(sq);
         PieceType::King.attacks(sq, occ) & self.get_piece(PieceType::King, swap_side(self.get_color_to_move())) & !exclude > 0
             || PieceType::Knight.attacks(sq, occ) & self.get_piece(PieceType::Knight, swap_side(self.get_color_to_move())) & !exclude > 0
@@ -66,7 +65,7 @@ impl GameState {
     }
     //Returns a bitboard of allthe pieces attacking the square
     //Occ: Blockers in the current position. Might be all_pieces or all_pieces without ctm king
-    pub fn square_attackers(&self, sq: usize, occ: u64) -> u64 {
+    pub fn square_attackers(&self, sq: usize, occ: BitBoard) -> BitBoard {
         let square = square(sq);
         PieceType::King.attacks(sq, occ) & self.get_piece(PieceType::King, swap_side(self.get_color_to_move()))
             | PieceType::Knight.attacks(sq, occ) & self.get_piece(PieceType::Knight, swap_side(self.get_color_to_move()))
@@ -75,21 +74,21 @@ impl GameState {
             | pawn_targets(self.get_color_to_move(), square) & self.get_piece(PieceType::Pawn, swap_side(self.get_color_to_move()))
     }
 
-    pub fn get_checkers(&self) -> u64 {
+    pub fn get_checkers(&self) -> BitBoard {
         self.square_attackers(self.get_king_square(self.get_color_to_move()), self.get_all_pieces())
     }
     pub fn in_check(&self) -> bool {
-        self.square_attacked(self.get_king_square(self.get_color_to_move()), self.get_all_pieces(), 0u64)
+        self.square_attacked(self.get_king_square(self.get_color_to_move()), self.get_all_pieces(), BitBoard::default())
     }
 }
 
 impl PieceType {
     //Occ not needed for PieceType::King, PieceType::Knight
     #[inline(always)]
-    pub fn attacks(&self, from: usize, occ: u64) -> u64 {
+    pub fn attacks(&self, from: usize, occ: BitBoard) -> BitBoard {
         match self {
-            PieceType::King => KING_ATTACKS[from],
-            PieceType::Knight => KNIGHT_ATTACKS[from],
+            PieceType::King => BitBoard(KING_ATTACKS[from]),
+            PieceType::Knight => BitBoard(KNIGHT_ATTACKS[from]),
             PieceType::Rook => rook_attack(from, occ),
             PieceType::Queen => bishop_attack(from, occ) | rook_attack(from, occ),
             PieceType::Bishop => bishop_attack(from, occ),
@@ -99,18 +98,18 @@ impl PieceType {
 }
 
 #[inline(always)]
-pub fn bishop_attack(square: usize, all_pieces: u64) -> u64 {
+pub fn bishop_attack(square: usize, all_pieces: BitBoard) -> BitBoard {
     magic::Magic::bishop(square, all_pieces)
 }
 
 #[inline(always)]
-pub fn rook_attack(square: usize, all_pieces: u64) -> u64 {
+pub fn rook_attack(square: usize, all_pieces: BitBoard) -> BitBoard {
     magic::Magic::rook(square, all_pieces)
 }
 
 //Pawn single pushes
 #[inline(always)]
-pub fn single_push_pawn_targets(side: usize, pawns: u64, empty: u64) -> u64 {
+pub fn single_push_pawn_targets(side: usize, pawns: BitBoard, empty: BitBoard) -> BitBoard {
     if side == WHITE {
         bitboards::north_one(pawns) & empty
     } else {
@@ -120,22 +119,22 @@ pub fn single_push_pawn_targets(side: usize, pawns: u64, empty: u64) -> u64 {
 
 //Pawn double pushes
 #[inline(always)]
-pub fn double_push_pawn_targets(side: usize, pawns: u64, empty: u64) -> u64 {
+pub fn double_push_pawn_targets(side: usize, pawns: BitBoard, empty: BitBoard) -> BitBoard {
     if side == WHITE {
-        bitboards::north_one(bitboards::north_one(pawns & RANKS[1]) & empty) & empty
+        bitboards::north_one(bitboards::north_one(pawns & BitBoard(RANKS[1])) & empty) & empty
     } else {
-        bitboards::south_one(bitboards::south_one(pawns & RANKS[6]) & empty) & empty
+        bitboards::south_one(bitboards::south_one(pawns & BitBoard(RANKS[6])) & empty) & empty
     }
 }
 
 #[inline(always)]
-pub fn pawn_targets(side: usize, pawns: u64) -> u64 {
+pub fn pawn_targets(side: usize, pawns: BitBoard) -> BitBoard {
     pawn_east_targets(side, pawns) | pawn_west_targets(side, pawns)
 }
 
 //Pawn east targets
 #[inline(always)]
-pub fn pawn_east_targets(side: usize, pawns: u64) -> u64 {
+pub fn pawn_east_targets(side: usize, pawns: BitBoard) -> BitBoard {
     if side == WHITE {
         bitboards::north_east_one(pawns)
     } else {
@@ -145,7 +144,7 @@ pub fn pawn_east_targets(side: usize, pawns: u64) -> u64 {
 
 //Pawn west targets
 #[inline(always)]
-pub fn pawn_west_targets(side: usize, pawns: u64) -> u64 {
+pub fn pawn_west_targets(side: usize, pawns: BitBoard) -> BitBoard {
     if side == WHITE {
         bitboards::north_west_one(pawns)
     } else {
@@ -173,12 +172,12 @@ pub fn find_captured_piece_type(g: &GameState, to: usize) -> PieceType {
 }
 
 #[inline(always)]
-pub fn xray_rook_attacks(rook_attacks: u64, occupied_squares: u64, my_pieces: u64, rook_square: usize) -> u64 {
+pub fn xray_rook_attacks(rook_attacks: BitBoard, occupied_squares: BitBoard, my_pieces: BitBoard, rook_square: usize) -> BitBoard {
     rook_attacks ^ rook_attack(rook_square, occupied_squares ^ (my_pieces & rook_attacks))
 }
 
 #[inline(always)]
-pub fn xray_bishop_attacks(bishop_attacks: u64, occupied_squares: u64, my_pieces: u64, bishop_square: usize) -> u64 {
+pub fn xray_bishop_attacks(bishop_attacks: BitBoard, occupied_squares: BitBoard, my_pieces: BitBoard, bishop_square: usize) -> BitBoard {
     bishop_attacks ^ bishop_attack(bishop_square, occupied_squares ^ (my_pieces & bishop_attacks))
 }
 

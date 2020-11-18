@@ -23,10 +23,10 @@ impl Phase {
     }
     #[inline(always)]
     pub fn from_state(game_state: &GameState) -> Self {
-        let material_score = game_state.get_piece_bb(PieceType::Queen).count_ones() as i16 * PieceType::Queen.to_phase_score()
-            + game_state.get_piece_bb(PieceType::Knight).count_ones() as i16 * PieceType::Knight.to_phase_score()
-            + game_state.get_piece_bb(PieceType::Bishop).count_ones() as i16 * PieceType::Bishop.to_phase_score()
-            + game_state.get_piece_bb(PieceType::Rook).count_ones() as i16 * PieceType::Rook.to_phase_score();
+        let material_score = game_state.get_piece_bb(PieceType::Queen).popcount() as i16 * PieceType::Queen.to_phase_score()
+            + game_state.get_piece_bb(PieceType::Knight).popcount() as i16 * PieceType::Knight.to_phase_score()
+            + game_state.get_piece_bb(PieceType::Bishop).popcount() as i16 * PieceType::Bishop.to_phase_score()
+            + game_state.get_piece_bb(PieceType::Rook).popcount() as i16 * PieceType::Rook.to_phase_score();
         let mut res = Phase { phase: 0., material_score };
         res.update();
         res
