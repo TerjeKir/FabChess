@@ -57,11 +57,11 @@ impl GameState {
     //exclude: Exclude all attacks from pieces given in the exclude bitboard
     pub fn square_attacked(&self, sq: usize, occ: BitBoard, exclude: BitBoard) -> bool {
         let square = square(sq);
-        PieceType::King.attacks(sq, occ) & self.get_piece(PieceType::King, swap_side(self.get_color_to_move())) & !exclude > 0
-            || PieceType::Knight.attacks(sq, occ) & self.get_piece(PieceType::Knight, swap_side(self.get_color_to_move())) & !exclude > 0
-            || PieceType::Bishop.attacks(sq, occ) & self.get_bishop_like_bb(swap_side(self.get_color_to_move())) & !exclude > 0
-            || PieceType::Rook.attacks(sq, occ) & self.get_rook_like_bb(swap_side(self.get_color_to_move())) & !exclude > 0
-            || pawn_targets(self.get_color_to_move(), square) & self.get_piece(PieceType::Pawn, swap_side(self.get_color_to_move())) & !exclude > 0
+        (PieceType::King.attacks(sq, occ) & self.get_piece(PieceType::King, swap_side(self.get_color_to_move())) & !exclude).not_empty()
+            || (PieceType::Knight.attacks(sq, occ) & self.get_piece(PieceType::Knight, swap_side(self.get_color_to_move())) & !exclude).not_empty()
+            || (PieceType::Bishop.attacks(sq, occ) & self.get_bishop_like_bb(swap_side(self.get_color_to_move())) & !exclude).not_empty()
+            || (PieceType::Rook.attacks(sq, occ) & self.get_rook_like_bb(swap_side(self.get_color_to_move())) & !exclude).not_empty()
+            || (pawn_targets(self.get_color_to_move(), square) & self.get_piece(PieceType::Pawn, swap_side(self.get_color_to_move())) & !exclude).not_empty()
     }
     //Returns a bitboard of allthe pieces attacking the square
     //Occ: Blockers in the current position. Might be all_pieces or all_pieces without ctm king
@@ -156,15 +156,15 @@ pub fn pawn_west_targets(side: usize, pawns: BitBoard) -> BitBoard {
 pub fn find_captured_piece_type(g: &GameState, to: usize) -> PieceType {
     let to_board = square(to);
     let side = g.get_color_to_move();
-    if g.get_piece(PieceType::Pawn, swap_side(side)) & to_board != 0u64 {
+    if (g.get_piece(PieceType::Pawn, swap_side(side)) & to_board).not_empty() {
         PieceType::Pawn
-    } else if g.get_piece(PieceType::Knight, swap_side(side)) & to_board != 0u64 {
+    } else if (g.get_piece(PieceType::Knight, swap_side(side)) & to_board).not_empty() {
         PieceType::Knight
-    } else if g.get_piece(PieceType::Queen, swap_side(side)) & to_board != 0u64 {
+    } else if (g.get_piece(PieceType::Queen, swap_side(side)) & to_board).not_empty() {
         PieceType::Queen
-    } else if g.get_piece(PieceType::Bishop, swap_side(side)) & to_board != 0u64 {
+    } else if (g.get_piece(PieceType::Bishop, swap_side(side)) & to_board).not_empty() {
         PieceType::Bishop
-    } else if g.get_piece(PieceType::Rook, swap_side(side)) & to_board != 0u64 {
+    } else if (g.get_piece(PieceType::Rook, swap_side(side)) & to_board).not_empty() {
         PieceType::Rook
     } else {
         panic!("Shoudln't get here");
@@ -185,18 +185,18 @@ pub fn xray_bishop_attacks(bishop_attacks: BitBoard, occupied_squares: BitBoard,
 pub fn add_pin_moves_to_movelist(
     legal_moves: &mut MoveList,
     only_captures: bool,
-    ray_to_king: u64,
-    push_mask: u64,
-    capture_mask: u64,
-    enemy_pinner: u64,
+    ray_to_king: BitBoard,
+    push_mask: BitBoard,
+    capture_mask: BitBoard,
+    enemy_pinner: BitBoard,
     pinned_piece_position: usize,
     moving_piece_type: PieceType,
     pinner_position: usize,
-    enemy_queens: u64,
+    enemy_queens: BitBoard,
     other_pinner_piece_type: PieceType,
 ) {
     let pin_quiet_targets = ray_to_king & push_mask & !square(pinned_piece_position);
-    let pin_capture_possible = (capture_mask & enemy_pinner) != 0u64;
+    let pin_capture_possible = (capture_mask & enemy_pinner).not_empty();
     if !only_captures {
         add_moves_to_movelist(legal_moves, pinned_piece_position, pin_quiet_targets, moving_piece_type, GameMoveType::Quiet);
     }
@@ -206,7 +206,7 @@ pub fn add_pin_moves_to_movelist(
             pinned_piece_position,
             pinner_position,
             moving_piece_type,
-            GameMoveType::Capture(if enemy_pinner & enemy_queens != 0u64 {
+            GameMoveType::Capture(if (enemy_pinner & enemy_queens).not_empty() {
                 PieceType::Queen
             } else {
                 other_pinner_piece_type
@@ -216,11 +216,11 @@ pub fn add_pin_moves_to_movelist(
 }
 
 #[inline(always)]
-pub fn add_king_moves_to_movelist(g: &GameState, legal_moves: &mut MoveList, only_captures: bool, stm_legal_kingmoves: u64, stm_king_index: usize, enemy_pieces: u64) {
+pub fn add_king_moves_to_movelist(g: &GameState, legal_moves: &mut MoveList, only_captures: bool, stm_legal_kingmoves: BitBoard, stm_king_index: usize, enemy_pieces: BitBoard) {
     let mut captures = stm_legal_kingmoves & enemy_pieces;
     let quiets = stm_legal_kingmoves & !captures;
-    while captures != 0u64 {
-        let capture_index = captures.trailing_zeros() as usize;
+    while captures.not_empty() {
+        let capture_index = captures.pop_lsb() as usize;
         add_move_to_movelist(
             legal_moves,
             stm_king_index,
@@ -228,7 +228,6 @@ pub fn add_king_moves_to_movelist(g: &GameState, legal_moves: &mut MoveList, onl
             PieceType::King,
             GameMoveType::Capture(find_captured_piece_type(g, capture_index)),
         );
-        captures ^= square(capture_index);
     }
     if !only_captures {
         add_moves_to_movelist(legal_moves, stm_king_index, quiets, PieceType::King, GameMoveType::Quiet);
@@ -236,13 +235,21 @@ pub fn add_king_moves_to_movelist(g: &GameState, legal_moves: &mut MoveList, onl
 }
 
 #[inline(always)]
-pub fn add_pawn_moves_to_movelist(g: &GameState, legal_moves: &mut MoveList, mut target_board: u64, shift: usize, is_capture: bool, is_promotion: bool, pinned_pieces: u64) {
-    while target_board != 0u64 {
-        let pawn_index = target_board.trailing_zeros() as usize;
+pub fn add_pawn_moves_to_movelist(
+    g: &GameState,
+    legal_moves: &mut MoveList,
+    mut target_board: BitBoard,
+    shift: usize,
+    is_capture: bool,
+    is_promotion: bool,
+    pinned_pieces: BitBoard,
+) {
+    while target_board.not_empty() {
+        let pawn_index = target_board.pop_lsb() as usize;
         let pawn = square(pawn_index);
         let from_index = if g.get_color_to_move() == WHITE { pawn_index - shift } else { pawn_index + shift };
         let from_board = square(from_index);
-        if from_board & pinned_pieces == 0u64 {
+        if (from_board & pinned_pieces).is_empty() {
             let mv_type = if is_capture {
                 GameMoveType::Capture(find_captured_piece_type(g, pawn_index))
             } else {
@@ -254,7 +261,6 @@ pub fn add_pawn_moves_to_movelist(g: &GameState, legal_moves: &mut MoveList, mut
                 add_move_to_movelist(legal_moves, from_index, pawn_index, PieceType::Pawn, mv_type)
             }
         }
-        target_board ^= pawn;
     }
 }
 
@@ -263,22 +269,22 @@ pub fn add_normal_moves_to_movelist(
     g: &GameState,
     legal_moves: &mut MoveList,
     piece_type: PieceType,
-    mut piece_board: u64,
-    pinned_pieces: u64,
-    enemy_pieces: u64,
-    empty_squares: u64,
-    push_mask: u64,
-    capture_mask: u64,
+    mut piece_board: BitBoard,
+    pinned_pieces: BitBoard,
+    enemy_pieces: BitBoard,
+    empty_squares: BitBoard,
+    push_mask: BitBoard,
+    capture_mask: BitBoard,
     only_captures: bool,
 ) {
-    while piece_board != 0u64 {
-        let piece_index = piece_board.trailing_zeros() as usize;
+    while piece_board.not_empty() {
+        let piece_index = piece_board.pop_lsb() as usize;
         let piece = square(piece_index);
-        if pinned_pieces & piece == 0 {
+        if (pinned_pieces & piece).is_empty() {
             let piece_target = piece_type.attacks(piece_index, g.get_all_pieces());
             let mut captures = piece_target & capture_mask & enemy_pieces;
-            while captures != 0u64 {
-                let capture_index = captures.trailing_zeros() as usize;
+            while captures.not_empty() {
+                let capture_index = captures.pop_lsb() as usize;
                 add_move_to_movelist(
                     legal_moves,
                     piece_index,
@@ -286,7 +292,6 @@ pub fn add_normal_moves_to_movelist(
                     piece_type,
                     GameMoveType::Capture(find_captured_piece_type(g, capture_index)),
                 );
-                captures ^= square(capture_index);
             }
 
             if !only_captures {
@@ -294,7 +299,6 @@ pub fn add_normal_moves_to_movelist(
                 add_moves_to_movelist(legal_moves, piece_index, quiets, piece_type, GameMoveType::Quiet);
             }
         }
-        piece_board ^= piece;
     }
 }
 
@@ -322,11 +326,10 @@ pub fn add_promotion_move_to_movelist(legal_moves: &mut MoveList, from_square: u
 }
 
 #[inline(always)]
-pub fn add_moves_to_movelist(legal_moves: &mut MoveList, from_square: usize, mut target_board: u64, piece_type: PieceType, move_type: GameMoveType) {
-    while target_board != 0u64 {
-        let target_square = target_board.trailing_zeros() as usize;
+pub fn add_moves_to_movelist(legal_moves: &mut MoveList, from_square: usize, mut target_board: BitBoard, piece_type: PieceType, move_type: GameMoveType) {
+    while target_board.not_empty() {
+        let target_square = target_board.pop_lsb() as usize;
         add_move_to_movelist(legal_moves, from_square, target_square, piece_type, move_type);
-        target_board ^= square(target_square);
     }
 }
 
@@ -422,11 +425,11 @@ pub fn generate_moves(g: &GameState, only_captures: bool, movelist: &mut MoveLis
     //**********************************************************************
     //3. Check & Check Evasions
     let check_board = g.get_checkers();
-    let checkers = check_board.count_ones() as usize;
+    let checkers = check_board.popcount() as usize;
     let stm_incheck = checkers > 0;
 
-    let mut capture_mask = 0xFFFF_FFFF_FFFF_FFFFu64;
-    let mut push_mask = 0xFFFF_FFFF_FFFF_FFFFu64;
+    let mut capture_mask = BitBoard(0xFFFF_FFFF_FFFF_FFFFu64);
+    let mut push_mask = BitBoard(0xFFFF_FFFF_FFFF_FFFFu64);
     if checkers > 1 {
         //Double check, only safe king moves are legal
         return AdditionalGameStateInformation { stm_incheck };
@@ -434,38 +437,38 @@ pub fn generate_moves(g: &GameState, only_captures: bool, movelist: &mut MoveLis
         //Only a single checker
         capture_mask = check_board;
         //If it's a slider, we can also push in its way
-        if check_board & (g.get_bishop_like_bb(enemy) | g.get_piece(PieceType::Rook, enemy)) != 0u64 {
-            let checker_square = check_board.trailing_zeros() as usize;
-            if check_board & (FREEFIELD_ROOK_ATTACKS[g.get_king_square(side)]) != 0u64 {
+        if (check_board & (g.get_bishop_like_bb(enemy) | g.get_piece(PieceType::Rook, enemy))).not_empty() {
+            let checker_square = check_board.lsb() as usize;
+            if (check_board & BitBoard(FREEFIELD_ROOK_ATTACKS[g.get_king_square(side)])).not_empty() {
                 //Checker is rook-like
-                push_mask = ROOK_RAYS[g.get_king_square(side)][checker_square];
+                push_mask = BitBoard(ROOK_RAYS[g.get_king_square(side)][checker_square]);
             } else {
                 //Checker is bishop-like
-                push_mask = BISHOP_RAYS[g.get_king_square(side)][checker_square];
+                push_mask = BitBoard(BISHOP_RAYS[g.get_king_square(side)][checker_square]);
             }
         } else {
             //else, we can't do push (quiet) moves
-            push_mask = 0u64;
+            push_mask = BitBoard::default();
         }
     }
 
     //----------------------------------------------------------------------
     //**********************************************************************
     //4. Pins and pinned pieces
-    let mut pinned_pieces = 0u64;
+    let mut pinned_pieces = BitBoard::default();
     //4.1 Rook-Like pins
-    if FREEFIELD_ROOK_ATTACKS[g.get_king_square(side)] & g.get_rook_like_bb(enemy) != 0u64 {
+    if (BitBoard(FREEFIELD_ROOK_ATTACKS[g.get_king_square(side)]) & g.get_rook_like_bb(enemy)).not_empty() {
         let stm_rook_attacks_from_king = rook_attack(g.get_king_square(side), all_pieces);
         let stm_xray_rook_attacks_from_king = xray_rook_attacks(stm_rook_attacks_from_king, all_pieces, side_pieces, g.get_king_square(side));
         let mut enemy_rooks_on_xray = stm_xray_rook_attacks_from_king & g.get_rook_like_bb(enemy);
-        while enemy_rooks_on_xray != 0u64 {
-            let enemy_rook_position = enemy_rooks_on_xray.trailing_zeros() as usize;
+        while enemy_rooks_on_xray.not_empty() {
+            let enemy_rook_position = enemy_rooks_on_xray.pop_lsb() as usize;
             let enemy_rook = square(enemy_rook_position);
-            let ray_to_king = ROOK_RAYS[g.get_king_square(side)][enemy_rook_position];
+            let ray_to_king = BitBoard(ROOK_RAYS[g.get_king_square(side)][enemy_rook_position]);
             let pinned_piece = ray_to_king & side_pieces;
-            let pinned_piece_position = pinned_piece.trailing_zeros() as usize;
+            let pinned_piece_position = pinned_piece.lsb() as usize;
             pinned_pieces |= pinned_piece;
-            if pinned_piece & g.get_piece(PieceType::Queen, side) != 0u64 {
+            if (pinned_piece & g.get_piece(PieceType::Queen, side)).not_empty() {
                 //Add possible queen pushes
                 add_pin_moves_to_movelist(
                     movelist,
@@ -480,7 +483,7 @@ pub fn generate_moves(g: &GameState, only_captures: bool, movelist: &mut MoveLis
                     g.get_piece(PieceType::Queen, enemy),
                     PieceType::Rook,
                 );
-            } else if pinned_piece & g.get_piece(PieceType::Rook, side) != 0u64 {
+            } else if (pinned_piece & g.get_piece(PieceType::Rook, side)).not_empty() {
                 //Add possible rook pushes
                 add_pin_moves_to_movelist(
                     movelist,
@@ -495,7 +498,7 @@ pub fn generate_moves(g: &GameState, only_captures: bool, movelist: &mut MoveLis
                     g.get_piece(PieceType::Queen, enemy),
                     PieceType::Rook,
                 );
-            } else if pinned_piece & side_pawns != 0u64 {
+            } else if (pinned_piece & side_pawns).not_empty() {
                 //Add possible pawn pushes
                 side_pawns ^= pinned_piece;
                 let stm_pawn_pin_single_push = single_push_pawn_targets(side, pinned_piece, empty_squares) & ray_to_king & push_mask;
@@ -510,22 +513,21 @@ pub fn generate_moves(g: &GameState, only_captures: bool, movelist: &mut MoveLis
                     )
                 }
             }
-            enemy_rooks_on_xray ^= enemy_rook;
         }
     }
     //4.2 Bishop-Like pins
-    if FREEFIELD_BISHOP_ATTACKS[g.get_king_square(side)] & g.get_bishop_like_bb(enemy) != 0u64 {
+    if (BitBoard(FREEFIELD_BISHOP_ATTACKS[g.get_king_square(side)]) & g.get_bishop_like_bb(enemy)).not_empty() {
         let stm_bishop_attacks_from_king = bishop_attack(g.get_king_square(side), all_pieces);
         let stm_xray_bishop_attacks_from_king = xray_bishop_attacks(stm_bishop_attacks_from_king, all_pieces, side_pieces, g.get_king_square(side));
         let mut enemy_bishop_on_xray = stm_xray_bishop_attacks_from_king & g.get_bishop_like_bb(enemy);
-        while enemy_bishop_on_xray != 0u64 {
-            let enemy_bishop_position = enemy_bishop_on_xray.trailing_zeros() as usize;
+        while enemy_bishop_on_xray.not_empty() {
+            let enemy_bishop_position = enemy_bishop_on_xray.pop_lsb() as usize;
             let enemy_bishop = square(enemy_bishop_position);
-            let ray_to_king = BISHOP_RAYS[g.get_king_square(side)][enemy_bishop_position];
+            let ray_to_king = BitBoard(BISHOP_RAYS[g.get_king_square(side)][enemy_bishop_position]);
             let pinned_piece = ray_to_king & side_pieces;
-            let pinned_piece_position = pinned_piece.trailing_zeros() as usize;
+            let pinned_piece_position = pinned_piece.lsb() as usize;
             pinned_pieces |= pinned_piece;
-            if pinned_piece & g.get_piece(PieceType::Queen, side) != 0u64 {
+            if (pinned_piece & g.get_piece(PieceType::Queen, side)).not_empty() {
                 //Add possible queen pushes
                 add_pin_moves_to_movelist(
                     movelist,
@@ -540,7 +542,7 @@ pub fn generate_moves(g: &GameState, only_captures: bool, movelist: &mut MoveLis
                     g.get_piece(PieceType::Queen, enemy),
                     PieceType::Bishop,
                 );
-            } else if pinned_piece & g.get_piece(PieceType::Bishop, side) != 0u64 {
+            } else if (pinned_piece & g.get_piece(PieceType::Bishop, side)).not_empty() {
                 //Add possible bishop pushes
                 add_pin_moves_to_movelist(
                     movelist,
@@ -555,19 +557,19 @@ pub fn generate_moves(g: &GameState, only_captures: bool, movelist: &mut MoveLis
                     g.get_piece(PieceType::Queen, enemy),
                     PieceType::Bishop,
                 );
-            } else if pinned_piece & side_pawns != 0u64 {
+            } else if (pinned_piece & side_pawns).not_empty() {
                 //Add possible pawn captures
                 side_pawns ^= pinned_piece;
                 let stm_pawn_pin_target = pawn_targets(side, pinned_piece);
                 //Normal captures
                 let stm_pawn_pin_captures = stm_pawn_pin_target & capture_mask & enemy_bishop;
-                let stm_pawn_pin_promotion_capture = stm_pawn_pin_captures & RANKS[if stm_color_iswhite { 7 } else { 0 }];
-                if stm_pawn_pin_promotion_capture != 0u64 {
+                let stm_pawn_pin_promotion_capture = stm_pawn_pin_captures & BitBoard(RANKS[if stm_color_iswhite { 7 } else { 0 }]);
+                if stm_pawn_pin_promotion_capture.not_empty() {
                     add_promotion_move_to_movelist(
                         movelist,
                         pinned_piece_position,
                         enemy_bishop_position,
-                        GameMoveType::Capture(if enemy_bishop & g.get_piece(PieceType::Queen, enemy) != 0u64 {
+                        GameMoveType::Capture(if (enemy_bishop & g.get_piece(PieceType::Queen, enemy)).not_empty() {
                             PieceType::Queen
                         } else {
                             PieceType::Bishop
@@ -575,13 +577,13 @@ pub fn generate_moves(g: &GameState, only_captures: bool, movelist: &mut MoveLis
                     );
                 }
                 let stm_pawn_pin_nonpromotion_capture = stm_pawn_pin_captures & !stm_pawn_pin_promotion_capture;
-                if stm_pawn_pin_nonpromotion_capture != 0u64 {
+                if stm_pawn_pin_nonpromotion_capture.not_empty() {
                     add_move_to_movelist(
                         movelist,
                         pinned_piece_position,
                         enemy_bishop_position,
                         PieceType::Pawn,
-                        GameMoveType::Capture(if enemy_bishop & g.get_piece(PieceType::Queen, enemy) != 0u64 {
+                        GameMoveType::Capture(if (enemy_bishop & g.get_piece(PieceType::Queen, enemy)).not_empty() {
                             PieceType::Queen
                         } else {
                             PieceType::Bishop
@@ -590,17 +592,16 @@ pub fn generate_moves(g: &GameState, only_captures: bool, movelist: &mut MoveLis
                 }
                 //En passants
                 let stm_pawn_pin_enpassant = stm_pawn_pin_target & g.get_en_passant() & capture_mask & ray_to_king;
-                if stm_pawn_pin_enpassant != 0u64 {
+                if stm_pawn_pin_enpassant.not_empty() {
                     add_move_to_movelist(
                         movelist,
                         pinned_piece_position,
-                        stm_pawn_pin_enpassant.trailing_zeros() as usize,
+                        stm_pawn_pin_enpassant.lsb() as usize,
                         PieceType::Pawn,
                         GameMoveType::EnPassant,
                     );
                 }
             }
-            enemy_bishop_on_xray ^= enemy_bishop;
         }
     }
 
@@ -610,7 +611,7 @@ pub fn generate_moves(g: &GameState, only_captures: bool, movelist: &mut MoveLis
     //5.1 Single push (promotions and pushes)
     if !only_captures {
         let stm_pawns_single_push = (forward_one(side_pawns, side) & empty_squares) & push_mask;
-        let stm_pawn_promotions = stm_pawns_single_push & RANKS[if stm_color_iswhite { 7 } else { 0 }];
+        let stm_pawn_promotions = stm_pawns_single_push & BitBoard(RANKS[if stm_color_iswhite { 7 } else { 0 }]);
         add_pawn_moves_to_movelist(g, movelist, stm_pawn_promotions, 8, false, true, pinned_pieces);
         let stm_pawns_quiet_single_push = stm_pawns_single_push & !stm_pawn_promotions;
         add_pawn_moves_to_movelist(g, movelist, stm_pawns_quiet_single_push, 8, false, false, pinned_pieces);
@@ -626,28 +627,28 @@ pub fn generate_moves(g: &GameState, only_captures: bool, movelist: &mut MoveLis
     let west_targets = pawn_west_targets(side, side_pawns);
     let stm_pawn_west_captures = west_targets & capture_mask & enemy_pieces;
     //Split up in promotion and non-promotion captures
-    let stm_pawn_west_promotion_capture = stm_pawn_west_captures & RANKS[if stm_color_iswhite { 7 } else { 0 }];
+    let stm_pawn_west_promotion_capture = stm_pawn_west_captures & BitBoard(RANKS[if stm_color_iswhite { 7 } else { 0 }]);
     add_pawn_moves_to_movelist(g, movelist, stm_pawn_west_promotion_capture, 7, true, true, pinned_pieces);
     let stm_pawn_west_nonpromotion_capture = stm_pawn_west_captures & !stm_pawn_west_promotion_capture;
     add_pawn_moves_to_movelist(g, movelist, stm_pawn_west_nonpromotion_capture, 7, true, false, pinned_pieces);
     //En passants
     let stm_pawn_west_enpassants = west_targets & g.get_en_passant() & if stm_color_iswhite { capture_mask << 8 } else { capture_mask >> 8 };
-    if stm_pawn_west_enpassants != 0u64
-        && if stm_color_iswhite {
+    if stm_pawn_west_enpassants.not_empty()
+        && (if stm_color_iswhite {
             stm_pawn_west_enpassants >> 7
         } else {
             stm_pawn_west_enpassants << 7
-        } & pinned_pieces
-            == 0u64
+        } & pinned_pieces)
+            .is_empty()
     {
-        let pawn_index = stm_pawn_west_enpassants.trailing_zeros() as usize;
+        let pawn_index = stm_pawn_west_enpassants.lsb() as usize;
         let (pawn_from, removed_piece_index) = if stm_color_iswhite {
             (pawn_index - 7, pawn_index - 8)
         } else {
             (pawn_index + 7, pawn_index + 8)
         };
         let all_pieces_without_en_passants = all_pieces & !square(pawn_from) & !square(removed_piece_index);
-        if rook_attack(g.get_king_square(side), all_pieces_without_en_passants) & RANKS[rank_of(g.get_king_square(side))] & g.get_rook_like_bb(enemy) == 0u64 {
+        if (rook_attack(g.get_king_square(side), all_pieces_without_en_passants) & BitBoard(RANKS[rank_of(g.get_king_square(side))]) & g.get_rook_like_bb(enemy)).is_empty() {
             add_move_to_movelist(movelist, pawn_from, pawn_index, PieceType::Pawn, GameMoveType::EnPassant);
         }
     }
@@ -655,28 +656,28 @@ pub fn generate_moves(g: &GameState, only_captures: bool, movelist: &mut MoveLis
     let east_targets = pawn_east_targets(side, side_pawns);
     let stm_pawn_east_captures = east_targets & capture_mask & enemy_pieces;
     //Split up in promotion and non-promotion captures
-    let stm_pawn_east_promotion_capture = stm_pawn_east_captures & RANKS[if stm_color_iswhite { 7 } else { 0 }];
+    let stm_pawn_east_promotion_capture = stm_pawn_east_captures & BitBoard(RANKS[if stm_color_iswhite { 7 } else { 0 }]);
     add_pawn_moves_to_movelist(g, movelist, stm_pawn_east_promotion_capture, 9, true, true, pinned_pieces);
     let stm_pawn_east_nonpromotion_capture = stm_pawn_east_captures & !stm_pawn_east_promotion_capture;
     add_pawn_moves_to_movelist(g, movelist, stm_pawn_east_nonpromotion_capture, 9, true, false, pinned_pieces);
     //En passants
     let stm_pawn_east_enpassants = east_targets & g.get_en_passant() & if stm_color_iswhite { capture_mask << 8 } else { capture_mask >> 8 };
-    if stm_pawn_east_enpassants != 0u64
-        && if stm_color_iswhite {
+    if stm_pawn_east_enpassants.not_empty()
+        && (if stm_color_iswhite {
             stm_pawn_east_enpassants >> 9
         } else {
             stm_pawn_east_enpassants << 9
-        } & pinned_pieces
-            == 0u64
+        } & pinned_pieces)
+            .is_empty()
     {
-        let pawn_index = stm_pawn_east_enpassants.trailing_zeros() as usize;
+        let pawn_index = stm_pawn_east_enpassants.lsb() as usize;
         let (pawn_from, removed_piece_index) = if stm_color_iswhite {
             (pawn_index - 9, pawn_index - 8)
         } else {
             (pawn_index + 9, pawn_index + 8)
         };
         let all_pieces_without_en_passants = all_pieces & !square(pawn_from) & !square(removed_piece_index);
-        if rook_attack(g.get_king_square(side), all_pieces_without_en_passants) & RANKS[rank_of(g.get_king_square(side))] & g.get_rook_like_bb(enemy) == 0u64 {
+        if (rook_attack(g.get_king_square(side), all_pieces_without_en_passants) & BitBoard(RANKS[rank_of(g.get_king_square(side))]) & g.get_rook_like_bb(enemy)).is_empty() {
             add_move_to_movelist(movelist, pawn_from, pawn_index, PieceType::Pawn, GameMoveType::EnPassant);
         }
     }
@@ -703,7 +704,7 @@ pub fn generate_moves(g: &GameState, only_captures: bool, movelist: &mut MoveLis
     //7. Castling
     if !only_captures && checkers == 0 {
         if stm_color_iswhite {
-            if g.castle_white_kingside() && (all_pieces | enemy_attacks) & (square(square::F1) | square(square::G1)) == 0u64 {
+            if g.castle_white_kingside() && ((all_pieces | enemy_attacks) & (square(square::F1) | square(square::G1))).is_empty() {
                 movelist.add_move(GameMove {
                     from: g.get_king_square(side) as u8,
                     to: square::G1 as u8,
@@ -711,7 +712,7 @@ pub fn generate_moves(g: &GameState, only_captures: bool, movelist: &mut MoveLis
                     piece_type: PieceType::King,
                 });
             }
-            if g.castle_white_queenside() && ((all_pieces | enemy_attacks) & (square(square::C1) | square(square::D1)) | all_pieces & square(square::B1)) == 0u64 {
+            if g.castle_white_queenside() && ((all_pieces | enemy_attacks) & (square(square::C1) | square(square::D1)) | all_pieces & square(square::B1)).is_empty() {
                 movelist.add_move(GameMove {
                     from: g.get_king_square(side) as u8,
                     to: square::C1 as u8,
@@ -720,7 +721,7 @@ pub fn generate_moves(g: &GameState, only_captures: bool, movelist: &mut MoveLis
                 });
             }
         } else {
-            if g.castle_black_kingside() && (all_pieces | enemy_attacks) & (square(square::F8) | square(square::G8)) == 0u64 {
+            if g.castle_black_kingside() && ((all_pieces | enemy_attacks) & (square(square::F8) | square(square::G8))).is_empty() {
                 movelist.add_move(GameMove {
                     from: g.get_king_square(side) as u8,
                     to: square::G8 as u8,
@@ -728,7 +729,7 @@ pub fn generate_moves(g: &GameState, only_captures: bool, movelist: &mut MoveLis
                     piece_type: PieceType::King,
                 });
             }
-            if g.castle_black_queenside() && ((all_pieces | enemy_attacks) & (square(square::C8) | square(square::D8)) | all_pieces & square(square::B8)) == 0u64 {
+            if g.castle_black_queenside() && ((all_pieces | enemy_attacks) & (square(square::C8) | square(square::D8)) | all_pieces & square(square::B8)).is_empty() {
                 movelist.add_move(GameMove {
                     from: g.get_king_square(side) as u8,
                     to: square::C8 as u8,
